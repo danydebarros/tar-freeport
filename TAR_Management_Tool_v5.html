@@ -1387,7 +1387,13 @@ function computeLiveCharts(){
   var overallEnd=maxFinish||'2026-07-03';
 
   // Build FULL schedule day list (April to July)
-  var allDays=buildDayList(overallStart,overallEnd);
+  // Always start from the overall project start so curves begin at 0
+  var projectStart = (window.liveMeta||CHART_META).overall_start || overallStart;
+  var projectEnd   = (window.liveMeta||CHART_META).overall_end   || overallEnd;
+  // Use project start if earlier than equipment start (so x-axis is consistent)
+  var rangeStart = projectStart < overallStart ? projectStart : overallStart;
+  var rangeEnd   = projectEnd   > overallEnd   ? projectEnd   : overallEnd;
+  var allDays=buildDayList(rangeStart, rangeEnd);
 
   // Buckets for every day in full range
   var planLHByDay={}, planActByDay={}, actualLHByDay={}, actualActByDay={};
@@ -2405,7 +2411,13 @@ function computeFilteredSC(eqFilter){
     return base;
   }
 
-  var allDays=buildDayList(overallStart,overallEnd);
+  // Always start from the overall project start so curves begin at 0
+  var projectStart = (window.liveMeta||CHART_META).overall_start || overallStart;
+  var projectEnd   = (window.liveMeta||CHART_META).overall_end   || overallEnd;
+  // Use project start if earlier than equipment start (so x-axis is consistent)
+  var rangeStart = projectStart < overallStart ? projectStart : overallStart;
+  var rangeEnd   = projectEnd   > overallEnd   ? projectEnd   : overallEnd;
+  var allDays=buildDayList(rangeStart, rangeEnd);
 
   var lhBL={},lhE={},lhL={},lhA={};
   var aBL={},aE={},aL={},aA={};
