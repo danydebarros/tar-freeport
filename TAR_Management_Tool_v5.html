@@ -31,8 +31,11 @@
     var cv   = ctx.canvas;
 
     // Size canvas to container
-    var W = cv.offsetWidth  || (cv.parentElement && cv.parentElement.offsetWidth)  || 700;
-    var H = cv.offsetHeight || (cv.parentElement && cv.parentElement.offsetHeight) || 300;
+    cv.style.display = 'block';
+    var W = cv.parentElement ? (cv.parentElement.clientWidth || cv.parentElement.offsetWidth) : cv.offsetWidth;
+    var H = cv.parentElement ? (cv.parentElement.clientHeight || cv.parentElement.offsetHeight) : cv.offsetHeight;
+    if(!W || W < 100) W = 700;
+    if(!H || H < 100) H = 480;
     cv.width  = W;
     cv.height = H;
 
@@ -558,7 +561,7 @@ tr.selected td{background:#EEF5FD}
         <span class="legend-item"><span class="legend-swatch" style="background:rgba(226,75,74,.8)"></span>Headcount (over capacity)</span>
         <span class="legend-item"><span class="legend-swatch" style="background:#1E3A5F;height:2px"></span>Capacity limit</span>
       </div>
-      <div style="position:relative;height:320px"><canvas id="hist-canvas"></canvas></div>
+      <div style="position:relative;height:440px;width:100%"><canvas id="hist-canvas" style="width:100%;height:100%"></canvas></div>
     </div>
     <div id="hist-day-detail"></div>
   </div>
@@ -634,7 +637,7 @@ tr.selected td{background:#EEF5FD}
       <div class="chart-title" id="sc-title">Labor hours — planned vs actual</div>
       <div class="chart-sub" id="sc-sub"></div>
       <div class="chart-legend" id="sc-legend"></div>
-      <div style="position:relative;height:340px"><canvas id="sc-canvas"></canvas></div>
+      <div style="position:relative;height:500px;width:100%"><canvas id="sc-canvas" style="width:100%;height:100%"></canvas></div>
     </div>
   </div>
 
