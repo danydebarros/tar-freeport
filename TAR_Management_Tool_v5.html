@@ -5,47 +5,87 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Freeport ASU 3 — TAR Management Tool</title>
 <script>
-// Chart.js 4.x Canvas Shim — Retina/HiDPI aware
+// Chart.js 4.x Canvas Shim — deferred render + ResizeObserver
 ;(function(global){
   'use strict';
   var _all = [];
 
   function Chart(ctx, config){
-    this.ctx = ctx; this.config = config; this._dead = false;
+    this.ctx = ctx;
+    this.config = config;
+    this._dead = false;
     _all.push(this);
-    this._render();
+    // Defer render to next animation frame so layout is complete
+    var self = this;
+    if(typeof requestAnimationFrame !== 'undefined'){
+      requestAnimationFrame(function(){ if(!self._dead) self._render(); });
+    } else {
+      this._render();
+    }
   }
+
   Chart.register = function(){};
   Chart.defaults = {};
+
   Chart.prototype.destroy = function(){
     this._dead = true;
-    var i = _all.indexOf(this); if(i >= 0) _all.splice(i, 1);
+    if(this._ro){ this._ro.disconnect(); }
+    var i = _all.indexOf(this);
+    if(i >= 0) _all.splice(i, 1);
   };
-  Chart.prototype.update = function(){ if(!this._dead) this._render(); };
+
+  Chart.prototype.update = function(){
+    if(this._dead) return;
+    var self = this;
+    requestAnimationFrame(function(){ if(!self._dead) self._render(); });
+  };
 
   Chart.prototype._render = function(){
     if(this._dead) return;
     var ctx = this.ctx, cv = ctx.canvas, par = cv.parentElement;
     var dpr = window.devicePixelRatio || 1;
 
-    // CSS display size from parent container
+    // Get CSS dimensions — use getBoundingClientRect for accuracy
+    var rect = par ? par.getBoundingClientRect() : null;
+    var cssW = (rect && rect.width  > 10) ? rect.width  : (par ? par.offsetWidth  : 0);
+    var cssH = (rect && rect.height > 10) ? rect.height : (par ? par.offsetHeight : 0);
+
+    // If still zero (panel hidden), try again on next frame
+    if(cssW < 10){
+      var self = this;
+      requestAnimationFrame(function(){ if(!self._dead) self._render(); });
+      return;
+    }
+    if(cssH < 10) cssH = 420;
+
+    // Set CSS display size
     cv.style.display = 'block';
     cv.style.width   = '100%';
     cv.style.height  = '100%';
 
-    var cssW = par ? par.clientWidth  || par.offsetWidth  : 700;
-    var cssH = par ? par.clientHeight || par.offsetHeight : 420;
-    if(cssW < 50) cssW = 700;
-    if(cssH < 50) cssH = 420;
+    // Set physical pixel size (Retina-aware)
+    var physW = Math.round(cssW * dpr);
+    var physH = Math.round(cssH * dpr);
+    if(cv.width !== physW || cv.height !== physH){
+      cv.width  = physW;
+      cv.height = physH;
+    }
 
-    // Set physical pixel size = CSS size * DPR (prevents blurriness on Retina)
-    cv.width  = Math.round(cssW * dpr);
-    cv.height = Math.round(cssH * dpr);
-
-    // Scale context so all drawing uses CSS pixel coordinates
+    // Scale context to CSS pixels
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     this._draw(ctx, cssW, cssH);
+
+    // Set up ResizeObserver to re-render if container resizes
+    if(!this._ro && typeof ResizeObserver !== 'undefined' && par){
+      var self = this;
+      this._ro = new ResizeObserver(function(){
+        if(!self._dead){
+          requestAnimationFrame(function(){ if(!self._dead) self._render(); });
+        }
+      });
+      this._ro.observe(par);
+    }
   };
 
   Chart.prototype._draw = function(ctx, W, H){
@@ -79,13 +119,15 @@
       ctx.beginPath(); ctx.moveTo(pad.l,gy); ctx.lineTo(pad.l+pw,gy); ctx.stroke();
       var yv=yMin+(g/5)*yR;
       var yvs=yv>=1e6?(yv/1e6).toFixed(1)+'M':yv>=1000?(yv/1000).toFixed(1)+'k':Math.round(yv)+'';
-      ctx.fillStyle='#888'; ctx.font='11px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+      ctx.fillStyle='#888';
+      ctx.font='11px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
       ctx.textAlign='right'; ctx.fillText(yvs,pad.l-6,gy+4);
     }
 
-    // X axis labels
+    // X labels
     var sk=Math.max(1,Math.ceil(labels.length/(hasBars?18:24)));
-    ctx.fillStyle='#888'; ctx.font='10px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+    ctx.fillStyle='#888';
+    ctx.font='10px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
     ctx.textAlign='center';
     for(var i=0;i<labels.length;i+=sk){
       var lx=hasBars?Xb(i):X(i);
@@ -93,29 +135,32 @@
       ctx.fillText(labels[i]||'',0,0); ctx.restore();
     }
 
-    // Line point arrays
+    // Build line point arrays
     var lineDss=dss.filter(function(d){return d.type!=='bar';});
     var linePts=lineDss.map(function(ds){
       return (ds.data||[]).map(function(v,i){
-        return(v!=null&&!isNaN(+v))?{x:X(i),y:Y(+v),v:+v}:null;
+        return(v!=null&&!isNaN(+v))?{x:X(i),y:Y(+v)}:null;
       });
     });
 
-    // Fills between datasets (fill:'+1', fill:'-1', fill:true)
+    // Fills (fill:'+1', fill:'-1', fill:true)
     lineDss.forEach(function(ds,li){
       if(!ds.fill&&ds.fill!==0) return;
       var bg=ds.backgroundColor; if(!bg||bg==='transparent') return;
       var a=linePts[li].filter(Boolean);
       if(!a.length) return;
       if(ds.fill==='+1'||ds.fill===1){
-        var nb=linePts[li+1]; if(!nb) return; fillBetween(ctx,a,nb.filter(Boolean),bg);
+        var b=(linePts[li+1]||[]).filter(Boolean);
+        if(b.length) fillBetween(ctx,a,b,bg);
       } else if(ds.fill==='-1'||ds.fill===-1){
-        var pb=linePts[li-1]; if(!pb) return; fillBetween(ctx,a,pb.filter(Boolean),bg);
+        var b=(linePts[li-1]||[]).filter(Boolean);
+        if(b.length) fillBetween(ctx,a,b,bg);
       } else if(ds.fill===true){
         ctx.fillStyle=bg; ctx.beginPath();
         ctx.moveTo(a[0].x,Y(yMin));
         a.forEach(function(p){ctx.lineTo(p.x,p.y);});
-        ctx.lineTo(a[a.length-1].x,Y(yMin)); ctx.closePath(); ctx.fill();
+        ctx.lineTo(a[a.length-1].x,Y(yMin));
+        ctx.closePath(); ctx.fill();
       }
     });
 
@@ -128,12 +173,14 @@
           if(v==null||isNaN(v)) return;
           var cx=Xb(i)-bw*barDss.length/2+bi*bw;
           var bh=Math.max(0,ph*(+v-yMin)/yR), by=pad.t+ph-bh;
-          ctx.fillStyle=Array.isArray(ds.backgroundColor)?(ds.backgroundColor[i]||'#378ADD'):(ds.backgroundColor||'rgba(55,138,221,.6)');
-          var br=Math.min(ds.borderRadius||0,bw/2,bh/2);
+          ctx.fillStyle=Array.isArray(ds.backgroundColor)?
+            (ds.backgroundColor[i]||'#378ADD'):(ds.backgroundColor||'rgba(55,138,221,.6)');
+          var br=Math.min(ds.borderRadius||0,bw/2,bh>0?bh/2:0);
           if(br>0&&bh>0){rrect(ctx,cx,by,bw,bh,br);ctx.fill();}
           else if(bh>0){ctx.fillRect(cx,by,bw,bh);}
           if(ds.borderWidth&&ds.borderColor&&bh>0){
-            ctx.strokeStyle=ds.borderColor; ctx.lineWidth=ds.borderWidth; ctx.strokeRect(cx,by,bw,bh);
+            ctx.strokeStyle=ds.borderColor; ctx.lineWidth=ds.borderWidth;
+            ctx.strokeRect(cx,by,bw,bh);
           }
         });
       });
@@ -143,10 +190,11 @@
     lineDss.forEach(function(ds,li){
       var pts=linePts[li], nonNull=pts.filter(Boolean);
 
-      // Single-point vertical marker line
+      // Single-point vertical marker
       if(nonNull.length===1&&ds.borderDash&&ds.borderDash.length){
         var p=nonNull[0];
-        ctx.strokeStyle=ds.borderColor||'rgba(100,100,100,.5)'; ctx.lineWidth=ds.borderWidth||1;
+        ctx.strokeStyle=ds.borderColor||'rgba(100,100,100,.5)';
+        ctx.lineWidth=ds.borderWidth||1;
         ctx.setLineDash(ds.borderDash);
         ctx.beginPath(); ctx.moveTo(p.x,pad.t); ctx.lineTo(p.x,pad.t+ph); ctx.stroke();
         ctx.setLineDash([]);
@@ -163,17 +211,23 @@
 
       var tension=ds.tension!=null?ds.tension:0;
       var spanGaps=ds.spanGaps!==false;
+
+      // Split into contiguous segments
       var segs=[],cur=[];
       pts.forEach(function(p){
         if(p!=null){cur.push(p);}
-        else if(!spanGaps){if(cur.length)segs.push(cur);cur=[];}
+        else if(!spanGaps){if(cur.length){segs.push(cur);cur=[];}}
       });
-      if(cur.length)segs.push(cur);
+      if(cur.length) segs.push(cur);
 
       segs.forEach(function(seg){
         if(!seg.length) return;
-        if(tension>0){bezier(ctx,seg,tension);}
-        else{ctx.beginPath();seg.forEach(function(p,j){j?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);});ctx.stroke();}
+        if(tension>0) bezier(ctx,seg,tension);
+        else{
+          ctx.beginPath();
+          seg.forEach(function(p,j){j?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);});
+          ctx.stroke();
+        }
       });
       ctx.setLineDash([]);
 
@@ -181,20 +235,24 @@
       var pr=ds.pointRadius;
       if(pr&&pr>0){
         ctx.fillStyle=ds.pointBackgroundColor||ds.borderColor||'#378ADD';
-        nonNull.forEach(function(p){ctx.beginPath();ctx.arc(p.x,p.y,pr,0,2*Math.PI);ctx.fill();});
+        nonNull.forEach(function(p){
+          ctx.beginPath(); ctx.arc(p.x,p.y,pr,0,2*Math.PI); ctx.fill();
+        });
       }
     });
 
     // Axes
     ctx.strokeStyle='#ccc'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(pad.l,pad.t); ctx.lineTo(pad.l,pad.t+ph); ctx.lineTo(pad.l+pw,pad.t+ph); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(pad.l,pad.t); ctx.lineTo(pad.l,pad.t+ph); ctx.lineTo(pad.l+pw,pad.t+ph);
+    ctx.stroke();
   };
 
   function fillBetween(ctx,a,b,color){
     if(!a.length||!b.length) return;
     ctx.fillStyle=color; ctx.beginPath();
     a.forEach(function(p,i){i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);});
-    for(var i=b.length-1;i>=0;i--)ctx.lineTo(b[i].x,b[i].y);
+    for(var i=b.length-1;i>=0;i--) ctx.lineTo(b[i].x,b[i].y);
     ctx.closePath(); ctx.fill();
   }
 
@@ -216,16 +274,8 @@
   function rrect(ctx,x,y,w,h,r){
     ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
     ctx.quadraticCurveTo(x+w,y,x+w,y+r); ctx.lineTo(x+w,y+h);
-    ctx.lineTo(x,y+h); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
-  }
-
-  // Redraw on window resize
-  if(typeof window!=='undefined'){
-    var _t;
-    window.addEventListener('resize',function(){
-      clearTimeout(_t);
-      _t=setTimeout(function(){_all.forEach(function(c){if(!c._dead)c._render();});},150);
-    });
+    ctx.lineTo(x,y+h); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
   }
 
   global.Chart = Chart;
@@ -776,7 +826,7 @@ function setStatus(type,msg){
 
 function loadData(payload){
   var wos=payload.wos; var scurve=payload.scurve;
-  allWO=wos; mainWO=wos; ACT_INDEX={};  // mainWO = permanent main scope reference
+  allWO=wos; mainWO=wos; ACT_INDEX={};
   wos.forEach(function(wo){
     // Enrich acts with headcount if coming from live (acts may not have dur_h)
     (wo.acts||[]).forEach(function(a){
@@ -1748,6 +1798,7 @@ function getScopedWOs() {
 
 function rebuildFromWOs(wos) {
   // Rebuild allCP, RES_DATA, filters from the given WO set
+  var savedAllWO = allWO;
   allWO = wos; ACT_INDEX = {};
   wos.forEach(function(wo){
     (wo.acts||[]).forEach(function(a){
