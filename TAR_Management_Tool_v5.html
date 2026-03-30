@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Freeport ASU 3 — TAR Management Tool</title>
 <script>
-// Chart.js 4.x Canvas Shim — full width responsive
+// Chart.js 4.x Canvas Shim — Retina/HiDPI aware
 ;(function(global){
   'use strict';
   var _all = [];
@@ -17,24 +17,35 @@
   }
   Chart.register = function(){};
   Chart.defaults = {};
-  Chart.prototype.destroy = function(){ this._dead = true; var i=_all.indexOf(this); if(i>=0)_all.splice(i,1); };
-  Chart.prototype.update  = function(){ if(!this._dead) this._render(); };
+  Chart.prototype.destroy = function(){
+    this._dead = true;
+    var i = _all.indexOf(this); if(i >= 0) _all.splice(i, 1);
+  };
+  Chart.prototype.update = function(){ if(!this._dead) this._render(); };
 
   Chart.prototype._render = function(){
     if(this._dead) return;
     var ctx = this.ctx, cv = ctx.canvas, par = cv.parentElement;
-    // Make canvas a block element filling its container
+    var dpr = window.devicePixelRatio || 1;
+
+    // CSS display size from parent container
     cv.style.display = 'block';
     cv.style.width   = '100%';
     cv.style.height  = '100%';
-    // Read dimensions from parent (the position:relative div with explicit height)
-    var rect = par ? par.getBoundingClientRect() : null;
-    var W = (rect && rect.width  > 10) ? Math.round(rect.width)  : (par ? par.offsetWidth  : 0) || cv.offsetWidth  || 700;
-    var H = (rect && rect.height > 10) ? Math.round(rect.height) : (par ? par.offsetHeight : 0) || cv.offsetHeight || 400;
-    if(W < 50) W = 700;
-    if(H < 50) H = 400;
-    cv.width = W; cv.height = H;
-    this._draw(ctx, W, H);
+
+    var cssW = par ? par.clientWidth  || par.offsetWidth  : 700;
+    var cssH = par ? par.clientHeight || par.offsetHeight : 420;
+    if(cssW < 50) cssW = 700;
+    if(cssH < 50) cssH = 420;
+
+    // Set physical pixel size = CSS size * DPR (prevents blurriness on Retina)
+    cv.width  = Math.round(cssW * dpr);
+    cv.height = Math.round(cssH * dpr);
+
+    // Scale context so all drawing uses CSS pixel coordinates
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    this._draw(ctx, cssW, cssH);
   };
 
   Chart.prototype._draw = function(ctx, W, H){
@@ -58,39 +69,54 @@
     var Y=function(v){return pad.t+ph-((+v-yMin)/yR)*ph;};
     var Xb=function(i){return pad.l+(i+0.5)/labels.length*pw;};
 
-    // Background + grid
+    // Background
     ctx.fillStyle='#f9fafb'; ctx.fillRect(0,0,W,H);
+
+    // Grid lines + y labels
     for(var g=0;g<=5;g++){
       var gy=pad.t+ph*(1-g/5);
       ctx.strokeStyle='rgba(0,0,0,.05)'; ctx.lineWidth=1;
       ctx.beginPath(); ctx.moveTo(pad.l,gy); ctx.lineTo(pad.l+pw,gy); ctx.stroke();
-      var yv=yMin+(g/5)*yR, yvs=yv>=1e6?(yv/1e6).toFixed(1)+'M':yv>=1000?(yv/1000).toFixed(1)+'k':Math.round(yv)+'';
-      ctx.fillStyle='#888'; ctx.font='10px sans-serif'; ctx.textAlign='right';
-      ctx.fillText(yvs,pad.l-6,gy+4);
+      var yv=yMin+(g/5)*yR;
+      var yvs=yv>=1e6?(yv/1e6).toFixed(1)+'M':yv>=1000?(yv/1000).toFixed(1)+'k':Math.round(yv)+'';
+      ctx.fillStyle='#888'; ctx.font='11px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+      ctx.textAlign='right'; ctx.fillText(yvs,pad.l-6,gy+4);
     }
-    // X labels
+
+    // X axis labels
     var sk=Math.max(1,Math.ceil(labels.length/(hasBars?18:24)));
-    ctx.fillStyle='#888'; ctx.font='10px sans-serif'; ctx.textAlign='center';
+    ctx.fillStyle='#888'; ctx.font='10px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+    ctx.textAlign='center';
     for(var i=0;i<labels.length;i+=sk){
       var lx=hasBars?Xb(i):X(i);
       ctx.save(); ctx.translate(lx,pad.t+ph+10); ctx.rotate(Math.PI/4);
       ctx.fillText(labels[i]||'',0,0); ctx.restore();
     }
 
-    // Build line point arrays (for fill:'+1'/'-1')
+    // Line point arrays
     var lineDss=dss.filter(function(d){return d.type!=='bar';});
     var linePts=lineDss.map(function(ds){
-      return (ds.data||[]).map(function(v,i){return(v!=null&&!isNaN(+v))?{x:X(i),y:Y(+v),v:+v}:null;});
+      return (ds.data||[]).map(function(v,i){
+        return(v!=null&&!isNaN(+v))?{x:X(i),y:Y(+v),v:+v}:null;
+      });
     });
 
-    // Fills
+    // Fills between datasets (fill:'+1', fill:'-1', fill:true)
     lineDss.forEach(function(ds,li){
       if(!ds.fill&&ds.fill!==0) return;
       var bg=ds.backgroundColor; if(!bg||bg==='transparent') return;
       var a=linePts[li].filter(Boolean);
-      if(ds.fill==='+1'||ds.fill===1){ var b=linePts[li+1]; if(b) fillBetween(ctx,a,b.filter(Boolean),bg); }
-      else if(ds.fill==='-1'||ds.fill===-1){ var b=linePts[li-1]; if(b) fillBetween(ctx,a,b.filter(Boolean),bg); }
-      else if(ds.fill===true&&a.length){ ctx.fillStyle=bg; ctx.beginPath(); ctx.moveTo(a[0].x,Y(yMin)); a.forEach(function(p){ctx.lineTo(p.x,p.y);}); ctx.lineTo(a[a.length-1].x,Y(yMin)); ctx.closePath(); ctx.fill(); }
+      if(!a.length) return;
+      if(ds.fill==='+1'||ds.fill===1){
+        var nb=linePts[li+1]; if(!nb) return; fillBetween(ctx,a,nb.filter(Boolean),bg);
+      } else if(ds.fill==='-1'||ds.fill===-1){
+        var pb=linePts[li-1]; if(!pb) return; fillBetween(ctx,a,pb.filter(Boolean),bg);
+      } else if(ds.fill===true){
+        ctx.fillStyle=bg; ctx.beginPath();
+        ctx.moveTo(a[0].x,Y(yMin));
+        a.forEach(function(p){ctx.lineTo(p.x,p.y);});
+        ctx.lineTo(a[a.length-1].x,Y(yMin)); ctx.closePath(); ctx.fill();
+      }
     });
 
     // Bars
@@ -100,11 +126,15 @@
       barDss.forEach(function(ds,bi){
         (ds.data||[]).forEach(function(v,i){
           if(v==null||isNaN(v)) return;
-          var cx=Xb(i)-bw*barDss.length/2+bi*bw, bh=ph*(+v-yMin)/yR, by=pad.t+ph-bh;
+          var cx=Xb(i)-bw*barDss.length/2+bi*bw;
+          var bh=Math.max(0,ph*(+v-yMin)/yR), by=pad.t+ph-bh;
           ctx.fillStyle=Array.isArray(ds.backgroundColor)?(ds.backgroundColor[i]||'#378ADD'):(ds.backgroundColor||'rgba(55,138,221,.6)');
-          var br=Math.min(ds.borderRadius||0,bw/2,Math.max(0,bh/2));
-          if(br>0&&bh>0){rrect(ctx,cx,by,bw,bh,br);ctx.fill();}else if(bh>0){ctx.fillRect(cx,by,bw,bh);}
-          if(ds.borderWidth&&ds.borderColor){ctx.strokeStyle=ds.borderColor;ctx.lineWidth=ds.borderWidth;ctx.strokeRect(cx,by,bw,bh);}
+          var br=Math.min(ds.borderRadius||0,bw/2,bh/2);
+          if(br>0&&bh>0){rrect(ctx,cx,by,bw,bh,br);ctx.fill();}
+          else if(bh>0){ctx.fillRect(cx,by,bw,bh);}
+          if(ds.borderWidth&&ds.borderColor&&bh>0){
+            ctx.strokeStyle=ds.borderColor; ctx.lineWidth=ds.borderWidth; ctx.strokeRect(cx,by,bw,bh);
+          }
         });
       });
     }
@@ -112,35 +142,41 @@
     // Lines
     lineDss.forEach(function(ds,li){
       var pts=linePts[li], nonNull=pts.filter(Boolean);
-      // Vertical marker: single non-null point with a dash
+
+      // Single-point vertical marker line
       if(nonNull.length===1&&ds.borderDash&&ds.borderDash.length){
         var p=nonNull[0];
         ctx.strokeStyle=ds.borderColor||'rgba(100,100,100,.5)'; ctx.lineWidth=ds.borderWidth||1;
         ctx.setLineDash(ds.borderDash);
         ctx.beginPath(); ctx.moveTo(p.x,pad.t); ctx.lineTo(p.x,pad.t+ph); ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle='rgba(80,80,80,.6)'; ctx.font='10px sans-serif'; ctx.textAlign='left';
-        ctx.fillText('as at',p.x+4,pad.t+14);
+        ctx.fillStyle='rgba(80,80,80,.65)';
+        ctx.font='10px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+        ctx.textAlign='left'; ctx.fillText('as at',p.x+4,pad.t+14);
         return;
       }
       if(!nonNull.length) return;
+
       ctx.setLineDash(ds.borderDash&&ds.borderDash.length?ds.borderDash:[]);
-      ctx.strokeStyle=ds.borderColor||'#378ADD'; ctx.lineWidth=ds.borderWidth||2;
+      ctx.strokeStyle=ds.borderColor||'#378ADD';
+      ctx.lineWidth=ds.borderWidth||2;
+
       var tension=ds.tension!=null?ds.tension:0;
       var spanGaps=ds.spanGaps!==false;
-      // Split into segments (respects spanGaps:false)
       var segs=[],cur=[];
       pts.forEach(function(p){
-        if(p!=null)cur.push(p);
+        if(p!=null){cur.push(p);}
         else if(!spanGaps){if(cur.length)segs.push(cur);cur=[];}
       });
       if(cur.length)segs.push(cur);
+
       segs.forEach(function(seg){
-        if(seg.length<1) return;
-        if(tension>0)bezier(ctx,seg,tension);
+        if(!seg.length) return;
+        if(tension>0){bezier(ctx,seg,tension);}
         else{ctx.beginPath();seg.forEach(function(p,j){j?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);});ctx.stroke();}
       });
       ctx.setLineDash([]);
+
       // Dots
       var pr=ds.pointRadius;
       if(pr&&pr>0){
@@ -168,7 +204,11 @@
     var t=tension*0.35;
     for(var i=1;i<pts.length;i++){
       var p0=pts[i-2]||pts[i-1],p1=pts[i-1],p2=pts[i],p3=pts[i+1]||p2;
-      ctx.bezierCurveTo(p1.x+t*(p2.x-p0.x),p1.y+t*(p2.y-p0.y),p2.x-t*(p3.x-p1.x),p2.y-t*(p3.y-p1.y),p2.x,p2.y);
+      ctx.bezierCurveTo(
+        p1.x+t*(p2.x-p0.x), p1.y+t*(p2.y-p0.y),
+        p2.x-t*(p3.x-p1.x), p2.y-t*(p3.y-p1.y),
+        p2.x, p2.y
+      );
     }
     ctx.stroke();
   }
@@ -179,7 +219,7 @@
     ctx.lineTo(x,y+h); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
   }
 
-  // Redraw on resize
+  // Redraw on window resize
   if(typeof window!=='undefined'){
     var _t;
     window.addEventListener('resize',function(){
@@ -439,7 +479,7 @@ tr.selected td{background:#EEF5FD}
         <span class="legend-item"><span class="legend-swatch" style="background:rgba(226,75,74,.8)"></span>Headcount (over capacity)</span>
         <span class="legend-item"><span class="legend-swatch" style="background:#1E3A5F;height:2px"></span>Capacity limit</span>
       </div>
-      <div style="position:relative;height:400px;width:100%"><canvas id="hist-canvas" style="display:block;width:100%;height:100%"></canvas></div>
+      <div style="position:relative;height:400px;width:100%"><canvas id="hist-canvas"></canvas></div>
     </div>
     <div id="hist-day-detail"></div>
   </div>
@@ -515,7 +555,7 @@ tr.selected td{background:#EEF5FD}
       <div class="chart-title" id="sc-title">Labor hours — planned vs actual</div>
       <div class="chart-sub" id="sc-sub"></div>
       <div class="chart-legend" id="sc-legend"></div>
-      <div style="position:relative;height:420px;width:100%"><canvas id="sc-canvas" style="display:block;width:100%;height:100%"></canvas></div>
+      <div style="position:relative;height:420px;width:100%"><canvas id="sc-canvas"></canvas></div>
     </div>
   </div>
 
@@ -619,7 +659,7 @@ var TAR_START_STR = CHART_META.tar_start;
 var TAR_END_STR   = CHART_META.tar_end;
 var EXCLUDE_CP = {A43060:1, A23330:1};
 
-var allWO=[], ACT_INDEX={}, allCP=[], RES_DATA=[];
+var allWO=[], mainWO=[], ACT_INDEX={}, allCP=[], RES_DATA=[];
 var filteredWO=[], filteredRes=[], filteredCP=[];
 var woPage=0; var WPS=50;
 var activeScChart=null, activeHistChart=null, activeSC='lh';
@@ -736,7 +776,7 @@ function setStatus(type,msg){
 
 function loadData(payload){
   var wos=payload.wos; var scurve=payload.scurve;
-  allWO=wos; ACT_INDEX={};
+  allWO=wos; mainWO=wos; ACT_INDEX={};  // mainWO = permanent main scope reference
   wos.forEach(function(wo){
     // Enrich acts with headcount if coming from live (acts may not have dur_h)
     (wo.acts||[]).forEach(function(a){
@@ -1695,7 +1735,7 @@ function setScope(scope) {
 }
 
 function getScopedWOs() {
-  if(activeScope === 'main') return allWO;
+  if(activeScope === 'main') return mainWO.length ? mainWO : allWO;
   if(activeScope === 'fco')  return fcoWO.length > 0 ? fcoWO : [];
   // Combined: merge main + FCO, tag each
   var combined = [].concat(allWO);
@@ -1708,7 +1748,6 @@ function getScopedWOs() {
 
 function rebuildFromWOs(wos) {
   // Rebuild allCP, RES_DATA, filters from the given WO set
-  var savedAllWO = allWO;
   allWO = wos; ACT_INDEX = {};
   wos.forEach(function(wo){
     (wo.acts||[]).forEach(function(a){
