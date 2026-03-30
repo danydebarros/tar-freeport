@@ -5,219 +5,147 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Freeport ASU 3 — TAR Management Tool</title>
 <script>
-// Chart.js 4.x Canvas Shim — responsive, full-width
+// Chart.js 4.x Canvas Shim — full width responsive
 ;(function(global){
   'use strict';
-
-  var _instances = [];
+  var _all = [];
 
   function Chart(ctx, config){
-    this.ctx = ctx;
-    this.config = config;
-    this._dead = false;
-    _instances.push(this);
+    this.ctx = ctx; this.config = config; this._dead = false;
+    _all.push(this);
     this._render();
   }
-
   Chart.register = function(){};
   Chart.defaults = {};
-
-  Chart.prototype.destroy = function(){
-    this._dead = true;
-    var i = _instances.indexOf(this);
-    if(i >= 0) _instances.splice(i, 1);
-  };
-  Chart.prototype.update = function(){ if(!this._dead) this._render(); };
+  Chart.prototype.destroy = function(){ this._dead = true; var i=_all.indexOf(this); if(i>=0)_all.splice(i,1); };
+  Chart.prototype.update  = function(){ if(!this._dead) this._render(); };
 
   Chart.prototype._render = function(){
     if(this._dead) return;
-    var ctx = this.ctx;
-    var cv  = ctx.canvas;
-    var parent = cv.parentElement;
-
-    // Get dimensions from parent container (like Chart.js does)
-    var W = parent ? parent.clientWidth : 0;
-    var H = parent ? parent.clientHeight : 0;
-    if(W < 10) W = cv.offsetWidth || 700;
-    if(H < 10) H = cv.offsetHeight || 400;
-    if(W < 10) W = 700;
-    if(H < 10) H = 400;
-
-    // Set actual canvas pixel dimensions
-    cv.width  = W;
-    cv.height = H;
-    // Set CSS size to fill container
+    var ctx = this.ctx, cv = ctx.canvas, par = cv.parentElement;
+    // Make canvas a block element filling its container
     cv.style.display = 'block';
     cv.style.width   = '100%';
     cv.style.height  = '100%';
-
-    this._doRender(ctx, W, H);
+    // Read dimensions from parent (the position:relative div with explicit height)
+    var rect = par ? par.getBoundingClientRect() : null;
+    var W = (rect && rect.width  > 10) ? Math.round(rect.width)  : (par ? par.offsetWidth  : 0) || cv.offsetWidth  || 700;
+    var H = (rect && rect.height > 10) ? Math.round(rect.height) : (par ? par.offsetHeight : 0) || cv.offsetHeight || 400;
+    if(W < 50) W = 700;
+    if(H < 50) H = 400;
+    cv.width = W; cv.height = H;
+    this._draw(ctx, W, H);
   };
 
-  Chart.prototype._doRender = function(ctx, W, H){
-    var cfg      = this.config;
-    var data     = cfg.data     || {};
-    var labels   = data.labels  || [];
-    var datasets = data.datasets|| [];
-    var opts     = cfg.options  || {};
-    var scales   = opts.scales  || {};
-    var yOpts    = scales.y     || {};
+  Chart.prototype._draw = function(ctx, W, H){
+    var cfg=this.config, data=cfg.data||{}, labels=data.labels||[], dss=data.datasets||[];
+    var opts=cfg.options||{}, yOpts=(opts.scales||{}).y||{};
+    ctx.clearRect(0,0,W,H);
 
-    ctx.clearRect(0, 0, W, H);
+    var pad={t:18,r:24,b:58,l:72};
+    var pw=W-pad.l-pad.r, ph=H-pad.t-pad.b;
+    if(pw<20||ph<20) return;
 
-    var pad = {t:18, r:24, b:58, l:72};
-    var pw  = W - pad.l - pad.r;
-    var ph  = H - pad.t - pad.b;
-    if(pw < 20 || ph < 20) return;
-
-    var hasBars = datasets.some(function(d){ return d.type === 'bar'; });
-
-    // Collect all y values
-    var allVals = [];
-    datasets.forEach(function(ds){
-      (ds.data||[]).forEach(function(v){ if(v!=null && !isNaN(v)) allVals.push(+v); });
-    });
-    var yMin = (yOpts.beginAtZero===false) ? (allVals.length?Math.min.apply(null,allVals):0) : 0;
-    var yMax = allVals.length ? Math.max.apply(null,allVals) : 1;
+    var hasBars=dss.some(function(d){return d.type==='bar';});
+    var allV=[];
+    dss.forEach(function(d){(d.data||[]).forEach(function(v){if(v!=null&&!isNaN(v))allV.push(+v);});});
+    var yMin=yOpts.beginAtZero===false?(allV.length?Math.min.apply(null,allV):0):0;
+    var yMax=allV.length?Math.max.apply(null,allV):1;
     if(yMax<=yMin) yMax=yMin+1;
-    var yR = yMax - yMin;
+    var yR=yMax-yMin;
 
-    var X    = function(i){ return labels.length<=1 ? pad.l+pw/2 : pad.l + i/(labels.length-1)*pw; };
-    var Y    = function(v){ return pad.t + ph - ((+v-yMin)/yR)*ph; };
-    var Xbar = function(i){ return pad.l + (i+0.5)/labels.length*pw; };
+    var X=function(i){return labels.length<=1?pad.l+pw/2:pad.l+i/(labels.length-1)*pw;};
+    var Y=function(v){return pad.t+ph-((+v-yMin)/yR)*ph;};
+    var Xb=function(i){return pad.l+(i+0.5)/labels.length*pw;};
 
-    // Background
-    ctx.fillStyle = '#f9fafb';
-    ctx.fillRect(0, 0, W, H);
-
-    // Grid lines + y labels
-    var nGrid = 5;
-    for(var g=0; g<=nGrid; g++){
-      var gy = pad.t + ph*(1-g/nGrid);
-      ctx.strokeStyle = 'rgba(0,0,0,0.05)'; ctx.lineWidth = 1;
+    // Background + grid
+    ctx.fillStyle='#f9fafb'; ctx.fillRect(0,0,W,H);
+    for(var g=0;g<=5;g++){
+      var gy=pad.t+ph*(1-g/5);
+      ctx.strokeStyle='rgba(0,0,0,.05)'; ctx.lineWidth=1;
       ctx.beginPath(); ctx.moveTo(pad.l,gy); ctx.lineTo(pad.l+pw,gy); ctx.stroke();
-      var yv = yMin + (g/nGrid)*yR;
-      var yvStr = yv>=1000000 ? (yv/1000000).toFixed(1)+'M' : yv>=1000 ? (yv/1000).toFixed(1)+'k' : Math.round(yv).toString();
+      var yv=yMin+(g/5)*yR, yvs=yv>=1e6?(yv/1e6).toFixed(1)+'M':yv>=1000?(yv/1000).toFixed(1)+'k':Math.round(yv)+'';
       ctx.fillStyle='#888'; ctx.font='10px sans-serif'; ctx.textAlign='right';
-      ctx.fillText(yvStr, pad.l-6, gy+4);
+      ctx.fillText(yvs,pad.l-6,gy+4);
     }
-
-    // X axis labels
-    var sk = Math.max(1, Math.ceil(labels.length / (hasBars ? 20 : 25)));
+    // X labels
+    var sk=Math.max(1,Math.ceil(labels.length/(hasBars?18:24)));
     ctx.fillStyle='#888'; ctx.font='10px sans-serif'; ctx.textAlign='center';
-    for(var i=0; i<labels.length; i+=sk){
-      var lx = hasBars ? Xbar(i) : X(i);
-      ctx.save(); ctx.translate(lx, pad.t+ph+10); ctx.rotate(Math.PI/4);
-      ctx.fillText(labels[i]||'', 0, 0); ctx.restore();
+    for(var i=0;i<labels.length;i+=sk){
+      var lx=hasBars?Xb(i):X(i);
+      ctx.save(); ctx.translate(lx,pad.t+ph+10); ctx.rotate(Math.PI/4);
+      ctx.fillText(labels[i]||'',0,0); ctx.restore();
     }
 
-    // ── Build line point arrays for fill:'+1'/'-1' ──
-    var lineDSets = datasets.filter(function(d){ return d.type!=='bar'; });
-    var linePts   = lineDSets.map(function(ds){
-      return (ds.data||[]).map(function(v,i){
-        return (v!=null && !isNaN(+v)) ? {x:X(i), y:Y(+v), v:+v} : null;
-      });
+    // Build line point arrays (for fill:'+1'/'-1')
+    var lineDss=dss.filter(function(d){return d.type!=='bar';});
+    var linePts=lineDss.map(function(ds){
+      return (ds.data||[]).map(function(v,i){return(v!=null&&!isNaN(+v))?{x:X(i),y:Y(+v),v:+v}:null;});
     });
 
-    // ── Fills ──
-    lineDSets.forEach(function(ds, li){
-      if(!ds.fill && ds.fill!==0) return;
-      var bg = ds.backgroundColor;
-      if(!bg || bg==='transparent') return;
-      var thisPts = linePts[li];
-      if(ds.fill==='+1' || ds.fill===1){
-        var next = linePts[li+1]; if(!next) return;
-        fillBetween(ctx, thisPts, next, bg, Y, yMin);
-      } else if(ds.fill==='-1' || ds.fill===-1){
-        var prev = linePts[li-1]; if(!prev) return;
-        fillBetween(ctx, thisPts, prev, bg, Y, yMin);
-      } else if(ds.fill===true){
-        var vp = thisPts.filter(Boolean);
-        if(!vp.length) return;
-        ctx.fillStyle = bg; ctx.beginPath();
-        ctx.moveTo(vp[0].x, Y(yMin));
-        vp.forEach(function(p){ ctx.lineTo(p.x,p.y); });
-        ctx.lineTo(vp[vp.length-1].x, Y(yMin));
-        ctx.closePath(); ctx.fill();
-      }
+    // Fills
+    lineDss.forEach(function(ds,li){
+      if(!ds.fill&&ds.fill!==0) return;
+      var bg=ds.backgroundColor; if(!bg||bg==='transparent') return;
+      var a=linePts[li].filter(Boolean);
+      if(ds.fill==='+1'||ds.fill===1){ var b=linePts[li+1]; if(b) fillBetween(ctx,a,b.filter(Boolean),bg); }
+      else if(ds.fill==='-1'||ds.fill===-1){ var b=linePts[li-1]; if(b) fillBetween(ctx,a,b.filter(Boolean),bg); }
+      else if(ds.fill===true&&a.length){ ctx.fillStyle=bg; ctx.beginPath(); ctx.moveTo(a[0].x,Y(yMin)); a.forEach(function(p){ctx.lineTo(p.x,p.y);}); ctx.lineTo(a[a.length-1].x,Y(yMin)); ctx.closePath(); ctx.fill(); }
     });
 
-    // ── Bars ──
-    var barDSets = datasets.filter(function(d){ return d.type==='bar'; });
-    if(barDSets.length){
-      var bw = Math.max(1, pw/labels.length*0.72/barDSets.length);
-      barDSets.forEach(function(ds, bi){
+    // Bars
+    var barDss=dss.filter(function(d){return d.type==='bar';});
+    if(barDss.length){
+      var bw=Math.max(1,pw/labels.length*0.72/barDss.length);
+      barDss.forEach(function(ds,bi){
         (ds.data||[]).forEach(function(v,i){
           if(v==null||isNaN(v)) return;
-          var cx = Xbar(i) - bw*barDSets.length/2 + bi*bw;
-          var bh = ph*(+v-yMin)/yR;
-          var by = pad.t+ph-bh;
-          ctx.fillStyle = Array.isArray(ds.backgroundColor)?(ds.backgroundColor[i]||'#378ADD'):(ds.backgroundColor||'rgba(55,138,221,.6)');
-          var br = Math.min(ds.borderRadius||0, bw/2, Math.max(0,bh/2));
-          if(br>0 && bh>0){ rrect(ctx,cx,by,bw,bh,br); ctx.fill(); }
-          else if(bh>0){ ctx.fillRect(cx,by,bw,bh); }
-          if(ds.borderWidth && ds.borderColor){
-            ctx.strokeStyle=ds.borderColor; ctx.lineWidth=ds.borderWidth;
-            ctx.strokeRect(cx,by,bw,bh);
-          }
+          var cx=Xb(i)-bw*barDss.length/2+bi*bw, bh=ph*(+v-yMin)/yR, by=pad.t+ph-bh;
+          ctx.fillStyle=Array.isArray(ds.backgroundColor)?(ds.backgroundColor[i]||'#378ADD'):(ds.backgroundColor||'rgba(55,138,221,.6)');
+          var br=Math.min(ds.borderRadius||0,bw/2,Math.max(0,bh/2));
+          if(br>0&&bh>0){rrect(ctx,cx,by,bw,bh,br);ctx.fill();}else if(bh>0){ctx.fillRect(cx,by,bw,bh);}
+          if(ds.borderWidth&&ds.borderColor){ctx.strokeStyle=ds.borderColor;ctx.lineWidth=ds.borderWidth;ctx.strokeRect(cx,by,bw,bh);}
         });
       });
     }
 
-    // ── Lines ──
-    lineDSets.forEach(function(ds, li){
-      var pts = linePts[li];
-      var nonNull = pts.filter(Boolean);
-
-      // Single-point vertical marker
-      if(nonNull.length===1 && ds.borderDash && ds.borderDash.length){
-        var p = nonNull[0];
-        ctx.strokeStyle = ds.borderColor||'rgba(100,100,100,.5)';
-        ctx.lineWidth   = ds.borderWidth||1;
+    // Lines
+    lineDss.forEach(function(ds,li){
+      var pts=linePts[li], nonNull=pts.filter(Boolean);
+      // Vertical marker: single non-null point with a dash
+      if(nonNull.length===1&&ds.borderDash&&ds.borderDash.length){
+        var p=nonNull[0];
+        ctx.strokeStyle=ds.borderColor||'rgba(100,100,100,.5)'; ctx.lineWidth=ds.borderWidth||1;
         ctx.setLineDash(ds.borderDash);
-        ctx.beginPath(); ctx.moveTo(p.x, pad.t); ctx.lineTo(p.x, pad.t+ph); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(p.x,pad.t); ctx.lineTo(p.x,pad.t+ph); ctx.stroke();
         ctx.setLineDash([]);
-        // "as at" label
-        ctx.fillStyle='rgba(80,80,80,.7)'; ctx.font='10px sans-serif'; ctx.textAlign='left';
-        ctx.fillText('as at', p.x+4, pad.t+14);
+        ctx.fillStyle='rgba(80,80,80,.6)'; ctx.font='10px sans-serif'; ctx.textAlign='left';
+        ctx.fillText('as at',p.x+4,pad.t+14);
         return;
       }
-
-      if(nonNull.length<1) return;
-
+      if(!nonNull.length) return;
       ctx.setLineDash(ds.borderDash&&ds.borderDash.length?ds.borderDash:[]);
-      ctx.strokeStyle = ds.borderColor||'#378ADD';
-      ctx.lineWidth   = ds.borderWidth||2;
-
-      var tension = ds.tension!=null ? ds.tension : 0;
-      // Draw only non-null segments (respects spanGaps:false)
-      var spanGaps = ds.spanGaps !== false;
-      var segments = [];
-      var cur = [];
+      ctx.strokeStyle=ds.borderColor||'#378ADD'; ctx.lineWidth=ds.borderWidth||2;
+      var tension=ds.tension!=null?ds.tension:0;
+      var spanGaps=ds.spanGaps!==false;
+      // Split into segments (respects spanGaps:false)
+      var segs=[],cur=[];
       pts.forEach(function(p){
-        if(p!=null){ cur.push(p); }
-        else if(!spanGaps){ if(cur.length) segments.push(cur); cur=[]; }
+        if(p!=null)cur.push(p);
+        else if(!spanGaps){if(cur.length)segs.push(cur);cur=[];}
       });
-      if(cur.length) segments.push(cur);
-
-      segments.forEach(function(seg){
+      if(cur.length)segs.push(cur);
+      segs.forEach(function(seg){
         if(seg.length<1) return;
-        if(tension>0) bezierStroke(ctx, seg, tension);
-        else{
-          ctx.beginPath();
-          seg.forEach(function(p,j){ j?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y); });
-          ctx.stroke();
-        }
+        if(tension>0)bezier(ctx,seg,tension);
+        else{ctx.beginPath();seg.forEach(function(p,j){j?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);});ctx.stroke();}
       });
       ctx.setLineDash([]);
-
-      // Points
-      var pr = ds.pointRadius;
-      if(pr && pr>0){
-        ctx.fillStyle = ds.pointBackgroundColor||ds.borderColor||'#378ADD';
-        nonNull.forEach(function(p){
-          ctx.beginPath(); ctx.arc(p.x,p.y,pr,0,2*Math.PI); ctx.fill();
-        });
+      // Dots
+      var pr=ds.pointRadius;
+      if(pr&&pr>0){
+        ctx.fillStyle=ds.pointBackgroundColor||ds.borderColor||'#378ADD';
+        nonNull.forEach(function(p){ctx.beginPath();ctx.arc(p.x,p.y,pr,0,2*Math.PI);ctx.fill();});
       }
     });
 
@@ -226,52 +154,42 @@
     ctx.beginPath(); ctx.moveTo(pad.l,pad.t); ctx.lineTo(pad.l,pad.t+ph); ctx.lineTo(pad.l+pw,pad.t+ph); ctx.stroke();
   };
 
-  function fillBetween(ctx, pts1, pts2, color, Y, yMin){
-    var a = pts1.filter(Boolean);
-    var b = pts2.filter(Boolean);
+  function fillBetween(ctx,a,b,color){
     if(!a.length||!b.length) return;
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    a.forEach(function(p,i){ i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y); });
-    for(var i=b.length-1;i>=0;i--) ctx.lineTo(b[i].x,b[i].y);
+    ctx.fillStyle=color; ctx.beginPath();
+    a.forEach(function(p,i){i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);});
+    for(var i=b.length-1;i>=0;i--)ctx.lineTo(b[i].x,b[i].y);
     ctx.closePath(); ctx.fill();
   }
 
-  function bezierStroke(ctx, pts, tension){
+  function bezier(ctx,pts,tension){
     if(pts.length<2) return;
     ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
-    var t = tension*0.35;
+    var t=tension*0.35;
     for(var i=1;i<pts.length;i++){
-      var p0=pts[i-2]||pts[i-1], p1=pts[i-1], p2=pts[i], p3=pts[i+1]||p2;
-      var cp1x=p1.x+t*(p2.x-p0.x), cp1y=p1.y+t*(p2.y-p0.y);
-      var cp2x=p2.x-t*(p3.x-p1.x), cp2y=p2.y-t*(p3.y-p1.y);
-      ctx.bezierCurveTo(cp1x,cp1y,cp2x,cp2y,p2.x,p2.y);
+      var p0=pts[i-2]||pts[i-1],p1=pts[i-1],p2=pts[i],p3=pts[i+1]||p2;
+      ctx.bezierCurveTo(p1.x+t*(p2.x-p0.x),p1.y+t*(p2.y-p0.y),p2.x-t*(p3.x-p1.x),p2.y-t*(p3.y-p1.y),p2.x,p2.y);
     }
     ctx.stroke();
   }
 
   function rrect(ctx,x,y,w,h,r){
-    ctx.beginPath();
-    ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
-    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
-    ctx.lineTo(x+w,y+h); ctx.lineTo(x,y+h); ctx.lineTo(x,y+r);
-    ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
+    ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r); ctx.lineTo(x+w,y+h);
+    ctx.lineTo(x,y+h); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
   }
 
-  // Redraw all charts on window resize
-  if(typeof window !== 'undefined'){
-    var resizeTimer;
-    window.addEventListener('resize', function(){
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(function(){
-        _instances.forEach(function(c){ if(!c._dead) c._render(); });
-      }, 150);
+  // Redraw on resize
+  if(typeof window!=='undefined'){
+    var _t;
+    window.addEventListener('resize',function(){
+      clearTimeout(_t);
+      _t=setTimeout(function(){_all.forEach(function(c){if(!c._dead)c._render();});},150);
     });
   }
 
   global.Chart = Chart;
-
-})(typeof window !== 'undefined' ? window : this);
+})(typeof window!=='undefined'?window:this);
 </script>
 
 <style>
@@ -521,7 +439,7 @@ tr.selected td{background:#EEF5FD}
         <span class="legend-item"><span class="legend-swatch" style="background:rgba(226,75,74,.8)"></span>Headcount (over capacity)</span>
         <span class="legend-item"><span class="legend-swatch" style="background:#1E3A5F;height:2px"></span>Capacity limit</span>
       </div>
-      <div style="position:relative;height:320px"><canvas id="hist-canvas"></canvas></div>
+      <div style="position:relative;height:400px;width:100%"><canvas id="hist-canvas" style="display:block;width:100%;height:100%"></canvas></div>
     </div>
     <div id="hist-day-detail"></div>
   </div>
@@ -597,7 +515,7 @@ tr.selected td{background:#EEF5FD}
       <div class="chart-title" id="sc-title">Labor hours — planned vs actual</div>
       <div class="chart-sub" id="sc-sub"></div>
       <div class="chart-legend" id="sc-legend"></div>
-      <div style="position:relative;height:340px"><canvas id="sc-canvas"></canvas></div>
+      <div style="position:relative;height:420px;width:100%"><canvas id="sc-canvas" style="display:block;width:100%;height:100%"></canvas></div>
     </div>
   </div>
 
