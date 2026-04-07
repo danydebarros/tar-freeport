@@ -1018,7 +1018,7 @@ function riskBadge(wo){
   return'<span class="badge b-ok">OK</span>';
 }
 function sn(r){return r.replace(/-FPT ASU\s*3?/gi,'').trim();}
-function fmtD(s){if(!s)return'—';var p=s.split('-');return p.length===3?p[2]+'/'+p[1]:s;}
+function fmtD(s){if(!s)return'—';var d=String(s).slice(0,10);var p=d.split('-');return p.length===3?p[2]+'/'+p[1]:s;}
 function hcBadge(hc){
   if(!hc||hc<=0)return'';
   var cls=hc>=10?'high':hc>=5?'med':'';
