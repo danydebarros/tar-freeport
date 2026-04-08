@@ -899,11 +899,6 @@ function loadData(payload){
       if(!a.hc) a.hc=calcHC(a.plan_lh,a.dur_h);
     });
     ACT_INDEX[wo.id]=wo.acts||[];
-    // Extract work_type from first activity if WO doesn't have it
-    if(!wo.wt){
-      var firstAct=(wo.acts||[])[0];
-      if(firstAct&&firstAct.work_type) wo.wt=firstAct.work_type;
-    }
   });
   // Convert float from days to hours
   wos.forEach(function(wo){
@@ -980,8 +975,10 @@ function buildFilters(){
   var phases=[]; var eqs=[]; var wts=[];
   allWO.forEach(function(w){
     if(phases.indexOf(w.ph)<0)phases.push(w.ph);
-    if(w.wt&&wts.indexOf(w.wt)<0)wts.push(w.wt);
     if(eqs.indexOf(w.eq)<0)eqs.push(w.eq);
+    (ACT_INDEX[w.id]||[]).forEach(function(a){
+      if(a.work_type&&wts.indexOf(a.work_type)<0)wts.push(a.work_type);
+    });
   });
   phases.sort().forEach(function(p){ document.getElementById('wo-phase').add(new Option(p,p)); });
   wts.sort().forEach(function(t){ if(wtEl) wtEl.add(new Option(t,t)); });
@@ -1060,7 +1057,7 @@ function filterWO(){
   if(q)res=res.filter(function(w){return w.name.toLowerCase().indexOf(q)>=0||w.id.toLowerCase().indexOf(q)>=0||
     (ACT_INDEX[w.id]||[]).some(function(a){return a.id.toLowerCase().indexOf(q)>=0||a.name.toLowerCase().indexOf(q)>=0;});});
   if(ph)res=res.filter(function(w){return w.ph===ph;});
-  if(wt)res=res.filter(function(w){return w.wt===wt;});
+  if(wt)res=res.filter(function(w){return (ACT_INDEX[w.id]||[]).some(function(a){return a.work_type===wt;});});
   if(eqList.length)res=res.filter(function(w){return eqList.indexOf(w.eq)>=0;});
   if(risk==='nc')res=res.filter(function(w){return w.mf!=null&&w.mf<=24;});
   else if(risk==='med')res=res.filter(function(w){return w.mf!=null&&w.mf<=48;});
