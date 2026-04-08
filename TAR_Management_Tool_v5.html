@@ -1026,6 +1026,7 @@ function riskBadge(wo){
 }
 function sn(r){return r.replace(/-FPT ASU\s*3?/gi,'').trim();}
 function fmtD(s){if(!s)return'—';var d=String(s).slice(0,10);var p=d.split('-');return p.length===3?p[2]+'/'+p[1]:s;}
+function fmtDur(a){var h=a.dur_h||0;if(!h&&a.dur)h=parseDurH(a.dur,a.start);return h?h.toFixed(0)+'h':'—';}
 function hcBadge(hc){
   if(!hc||hc<=0)return'';
   var cls=hc>=10?'high':hc>=5?'med':'';
@@ -1035,7 +1036,20 @@ function hcBadge(hc){
 // ---- WO Tab ----
 function renderWOStats(wos){
   var lh=0,alh=0,nc=0,ur=0;
-  wos.forEach(function(w){lh+=w.plan_lh;alh+=w.actual_lh||0;if(w.mf!=null&&w.mf<=24)nc++;if(!w.res||!w.res.length)ur++;});
+  var resF=window.activeWOResFilter||'';
+  wos.forEach(function(w){
+    if(resF){
+      // Sum only hours for activities matching the selected resource
+      (ACT_INDEX[w.id]||[]).forEach(function(a){
+        if((a.res||[]).some(function(r){return r===resF||r.toLowerCase().indexOf(resF.toLowerCase())>=0;})){
+          lh+=a.plan_lh||0; alh+=a.actual_lh||0;
+        }
+      });
+    } else {
+      lh+=w.plan_lh;alh+=w.actual_lh||0;
+    }
+    if(w.mf!=null&&w.mf<=24)nc++;if(!w.res||!w.res.length)ur++;
+  });
   document.getElementById('wo-stats').innerHTML=
     '<div class="stat"><div class="stat-label">Work orders</div><div class="stat-val">'+wos.length.toLocaleString()+'</div></div>'+
     '<div class="stat"><div class="stat-label">Plan hrs</div><div class="stat-val info">'+lh.toLocaleString()+'</div></div>'+
@@ -1166,7 +1180,7 @@ function renderWODetail(wo,acts){
       '<td style="font-family:monospace;font-size:11px;color:#185FA5;white-space:nowrap">'+a.id+'</td>'+
       '<td class="wrap">'+a.name+'</td>'+
       '<td class="date-cell">'+fmtD(a.start)+'</td><td class="date-cell">'+fmtD(a.finish)+'</td>'+
-      '<td style="white-space:nowrap">'+a.dur+'</td>'+
+      '<td style="white-space:nowrap">'+fmtDur(a)+'</td>'+
       '<td style="text-align:right">'+a.plan_lh+'h</td>'+
       '<td style="text-align:center">'+hcBadge(a.hc)+'</td>'+
       '<td style="text-align:right">'+(a.actual_lh||0)+'h'+(a.plan_lh>0?'<div class="prog-bar"><div class="prog-fill" style="width:'+pct+'%;background:#378ADD"></div></div>':'')+'</td>'+
@@ -1366,7 +1380,7 @@ function showDayDetail(resName, dayStr){
       '<td style="font-family:monospace;font-size:11px;color:#888">'+x.wo.id+'</td>'+
       '<td style="white-space:nowrap;font-size:12px">'+a.eq+'</td>'+
       '<td class="date-cell">'+fmtD(a.start)+'</td><td class="date-cell">'+fmtD(a.finish)+'</td>'+
-      '<td style="white-space:nowrap">'+a.dur+'</td>'+
+      '<td style="white-space:nowrap">'+fmtDur(a)+'</td>'+
       '<td style="text-align:right">'+a.plan_lh+'h</td>'+
       '<td style="text-align:center">'+hcBadge(a.hc)+'</td>'+
       '<td><span class="dot" style="background:'+fc(a.fd)+'"></span>'+(a.fs||'—')+'</td>'+
@@ -1426,7 +1440,7 @@ function renderCPTable(){
       '<td style="font-family:monospace;font-size:11px;color:#888">'+a.wo_id+'</td>'+
       '<td style="white-space:nowrap;font-size:12px">'+a.eq+'</td>'+
       '<td class="date-cell">'+fmtD(a.start)+'</td><td class="date-cell">'+fmtD(a.finish)+'</td>'+
-      '<td style="white-space:nowrap">'+a.dur+'</td>'+
+      '<td style="white-space:nowrap">'+fmtDur(a)+'</td>'+
       '<td style="text-align:right">'+a.plan_lh+'h</td>'+
       '<td style="text-align:center">'+hcBadge(a.hc)+'</td>'+
       '<td><span class="dot" style="background:'+fc(a.fd)+'"></span><strong>'+(a.fs||'—')+'</strong></td>'+
