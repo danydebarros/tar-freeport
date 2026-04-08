@@ -467,6 +467,7 @@ tr.selected td{background:#EEF5FD}
     <div class="filters">
       <input type="text" id="wo-search" placeholder="Search WO, name or activity ID..." oninput="filterWO()">
       <select id="wo-phase" onchange="filterWO()"><option value="">All phases</option></select>
+      <select id="wo-wt" onchange="filterWO()"><option value="">All work types</option></select>
       <div class="multi-select" id="wo-eq-wrap">
   <button class="multi-select-btn" onclick="toggleMultiSelect('wo-eq-wrap')">
     <span class="multi-select-label" id="wo-eq-label">All equipment types</span>
@@ -898,6 +899,11 @@ function loadData(payload){
       if(!a.hc) a.hc=calcHC(a.plan_lh,a.dur_h);
     });
     ACT_INDEX[wo.id]=wo.acts||[];
+    // Extract work_type from first activity if WO doesn't have it
+    if(!wo.wt){
+      var firstAct=(wo.acts||[])[0];
+      if(firstAct&&firstAct.work_type) wo.wt=firstAct.work_type;
+    }
   });
   // Convert float from days to hours
   wos.forEach(function(wo){
@@ -961,20 +967,24 @@ function buildResData(){
 }
 
 function buildFilters(){
-  // Clear phase dropdown (still a regular select)
+  // Clear phase and work type dropdowns
   var phaseEl = document.getElementById('wo-phase');
   if(phaseEl){ while(phaseEl.options.length>1) phaseEl.remove(1); }
+  var wtEl = document.getElementById('wo-wt');
+  if(wtEl){ while(wtEl.options.length>1) wtEl.remove(1); }
   // Clear resource dropdowns (still regular selects)
   ['wo-res','cp-res'].forEach(function(id){
     var el=document.getElementById(id); if(el){while(el.options.length>1)el.remove(1);}
   });
 
-  var phases=[]; var eqs=[];
+  var phases=[]; var eqs=[]; var wts=[];
   allWO.forEach(function(w){
     if(phases.indexOf(w.ph)<0)phases.push(w.ph);
+    if(w.wt&&wts.indexOf(w.wt)<0)wts.push(w.wt);
     if(eqs.indexOf(w.eq)<0)eqs.push(w.eq);
   });
   phases.sort().forEach(function(p){ document.getElementById('wo-phase').add(new Option(p,p)); });
+  wts.sort().forEach(function(t){ if(wtEl) wtEl.add(new Option(t,t)); });
 
   // Build equipment multi-select checkboxes
   ['wo-eq-wrap','cp-eq-wrap','sc-eq-wrap','behind-eq-wrap'].forEach(function(wrapId){
@@ -1040,6 +1050,7 @@ function filterWO(){
   woPage=0;
   var q=document.getElementById('wo-search').value.toLowerCase();
   var ph=document.getElementById('wo-phase').value;
+  var wt=document.getElementById('wo-wt')?document.getElementById('wo-wt').value:'';
   var eqList=getSelectedEq('wo-eq-wrap');
   var risk=document.getElementById('wo-risk').value;
   var woResEl=document.getElementById('wo-res');
@@ -1049,6 +1060,7 @@ function filterWO(){
   if(q)res=res.filter(function(w){return w.name.toLowerCase().indexOf(q)>=0||w.id.toLowerCase().indexOf(q)>=0||
     (ACT_INDEX[w.id]||[]).some(function(a){return a.id.toLowerCase().indexOf(q)>=0||a.name.toLowerCase().indexOf(q)>=0;});});
   if(ph)res=res.filter(function(w){return w.ph===ph;});
+  if(wt)res=res.filter(function(w){return w.wt===wt;});
   if(eqList.length)res=res.filter(function(w){return eqList.indexOf(w.eq)>=0;});
   if(risk==='nc')res=res.filter(function(w){return w.mf!=null&&w.mf<=24;});
   else if(risk==='med')res=res.filter(function(w){return w.mf!=null&&w.mf<=48;});
