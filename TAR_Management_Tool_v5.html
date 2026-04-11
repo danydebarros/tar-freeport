@@ -617,11 +617,6 @@ tr.selected td{background:#EEF5FD}
   <!-- S-CURVES -->
   <div class="panel" id="panel-scurve">
     <div class="fco-notice" id="fco-notice-scurve">⚠ <strong>FCO scope active</strong> — showing Field Change Order activities only. Switch to <a href="#" onclick="setScope('combined');return false">Combined</a> to see both scopes together.</div>
-    <div class="sc-selector" style="margin-bottom:8px">
-      <span class="filters-label" style="margin-right:4px">Scope:</span>
-      <button class="sc-scope-btn active" id="scope-standard" onclick="setSCScope('standard')">Standard</button>
-      <button class="sc-scope-btn" id="scope-cp" onclick="setSCScope('cp')">Critical Path</button>
-    </div>
     <div class="sc-selector">
       <button class="sc-btn active" data-sc="lh" onclick="selectSC(window.scScope==='cp'?'cp':'lh',this)">Manhours</button>
       <button class="sc-btn" data-sc="acts" onclick="selectSC(window.scScope==='cp'?'cp_acts':'acts',this)">Activity Completions</button>
@@ -629,7 +624,17 @@ tr.selected td{background:#EEF5FD}
       <button class="sc-btn" data-sc="float" onclick="selectSC('float',this)">Float burn-down</button>
       <button class="sc-btn" data-sc="combined_lh" onclick="selectSC('combined_lh',this)" id="btn-sc-combined" style="display:none">Combined manhours</button>
     </div>
-    <div class="filters" style="margin-bottom:.75rem">
+    <div class="filters" style="margin-bottom:.75rem;gap:12px">
+      <select id="sc-scope" onchange="onSCScopeChange()" style="font-size:13px;padding:6px 10px;height:34px;border:1px solid #d5dbe5;border-radius:7px;background:#fff;font-family:inherit;font-weight:600;color:#1E3A5F">
+        <option value="standard">Standard scope</option>
+        <option value="cp">Critical path</option>
+      </select>
+      <select id="sc-cp-threshold" onchange="onCPThresholdChange()" style="font-size:13px;padding:6px 10px;height:34px;border:1px solid #d5dbe5;border-radius:7px;background:#fff;font-family:inherit;display:none">
+        <option value="48">Float ≤ 48h (near + medium critical)</option>
+        <option value="24">Float ≤ 24h (near-critical only)</option>
+        <option value="96">Float ≤ 96h (all at-risk)</option>
+        <option value="0">Float = 0h (P6 critical path)</option>
+      </select>
       <div class="multi-select" id="sc-eq-wrap">
   <button class="multi-select-btn" onclick="toggleMultiSelect('sc-eq-wrap')">
     <span class="multi-select-label" id="sc-eq-label">All equipment types</span>
@@ -1544,7 +1549,8 @@ function computeLiveCharts(){
     if(isMilestone(a.id,a.name)) return;
     totalPlanLH+=a.plan_lh||0;
     totalActs++;
-    var isCP=a.fd!=null&&a.fd<=24&&!EXCLUDE_CP[a.id];
+    var cpThr=window.cpThreshold||48;
+    var isCP=a.fd!=null&&a.fd<=cpThr&&!EXCLUDE_CP[a.id];
     if(isCP) totalCPActs++;
 
     var sd=a.start?a.start.slice(0,10):'';
@@ -2691,10 +2697,12 @@ function buildSCStats(){
     '<div class="stat"><div class="stat-label">Actual complete (as at '+selectedDate+')</div><div class="stat-val">'+Math.round(actualActs).toLocaleString()+'</div></div>';
 }
 window.scScope='standard';
-function setSCScope(scope){
+window.cpThreshold=48;
+function onSCScopeChange(){
+  var scope=document.getElementById('sc-scope').value;
   window.scScope=scope;
-  document.getElementById('scope-standard').className='sc-scope-btn'+(scope==='standard'?' active':'');
-  document.getElementById('scope-cp').className='sc-scope-btn'+(scope==='cp'?' active':'');
+  var threshEl=document.getElementById('sc-cp-threshold');
+  if(threshEl) threshEl.style.display=scope==='cp'?'':'none';
   // Re-select the current chart type with new scope
   var btns=document.querySelectorAll('.sc-btn');
   var activeBtn=null;
@@ -2705,6 +2713,12 @@ function setSCScope(scope){
     else if(label.indexOf('Activity')>=0&&label.indexOf('per day')<0) selectSC(scope==='cp'?'cp_acts':'acts',activeBtn);
     else selectSC(activeSC,activeBtn);
   }
+}
+function onCPThresholdChange(){
+  var val=parseInt(document.getElementById('sc-cp-threshold').value);
+  window.cpThreshold=val;
+  computeLiveCharts();
+  buildSCStats();renderSC(activeSC);updateSCPctComplete(activeSC);renderSCWorkOrders();
 }
 function selectSC(key,btn){
   activeSC=key;
@@ -2792,7 +2806,8 @@ function renderSCWorkOrders(){
   if(key==='cp'||key==='cp_acts'){
     var cpWoIds={};
     allCP.forEach(function(a){
-      if(a.fd!=null&&a.fd<=24){
+      var cpThr=window.cpThreshold||48;
+      if(a.fd!=null&&a.fd<=cpThr){
         if(eqList.length && eqList.indexOf(a.eq)<0) return;
         cpWoIds[a.wo_id]=true;
       }
