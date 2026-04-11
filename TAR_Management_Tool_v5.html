@@ -352,6 +352,9 @@ tr.selected td{background:#EEF5FD}
 .sc-btn{padding:8px 16px;font-size:13px;border:1px solid #ddd;border-radius:20px;cursor:pointer;background:#fff;font-family:inherit;color:#555;transition:all .15s}
 .sc-btn.active{background:#1E3A5F;color:#fff;border-color:#1E3A5F;font-weight:500}
 .sc-btn:hover:not(.active){background:#f0ede8;color:#1E3A5F}
+.sc-scope-btn{padding:7px 16px;font-size:13px;border:1px solid #d5dbe5;border-radius:8px;cursor:pointer;background:#fff;font-family:inherit;color:#555;transition:all .15s;font-weight:600}
+.sc-scope-btn.active{background:#1E3A5F;color:#fff;border-color:#1E3A5F}
+.sc-scope-btn:hover:not(.active){background:#f0ede8;color:#1E3A5F}
 .chart-card{background:#fff;border:1px solid #e2e6ec;border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
 .chart-title{font-size:15px;font-weight:600;color:#1E3A5F;margin-bottom:2px}
 .chart-sub{font-size:12px;color:#888;margin-bottom:10px}
@@ -614,11 +617,14 @@ tr.selected td{background:#EEF5FD}
   <!-- S-CURVES -->
   <div class="panel" id="panel-scurve">
     <div class="fco-notice" id="fco-notice-scurve">⚠ <strong>FCO scope active</strong> — showing Field Change Order activities only. Switch to <a href="#" onclick="setScope('combined');return false">Combined</a> to see both scopes together.</div>
+    <div class="sc-selector" style="margin-bottom:8px">
+      <span class="filters-label" style="margin-right:4px">Scope:</span>
+      <button class="sc-scope-btn active" id="scope-standard" onclick="setSCScope('standard')">Standard</button>
+      <button class="sc-scope-btn" id="scope-cp" onclick="setSCScope('cp')">Critical Path</button>
+    </div>
     <div class="sc-selector">
-      <button class="sc-btn active" data-sc="lh" onclick="selectSC('lh',this)">S-curve — manhours</button>
-      <button class="sc-btn" data-sc="acts" onclick="selectSC('acts',this)">S-curve — activity completions</button>
-      <button class="sc-btn" data-sc="cp" onclick="selectSC('cp',this)">CP — manhours</button>
-      <button class="sc-btn" data-sc="cp_acts" onclick="selectSC('cp_acts',this)">CP — activities</button>
+      <button class="sc-btn active" data-sc="lh" onclick="selectSC(window.scScope==='cp'?'cp':'lh',this)">Manhours</button>
+      <button class="sc-btn" data-sc="acts" onclick="selectSC(window.scScope==='cp'?'cp_acts':'acts',this)">Activity Completions</button>
       <button class="sc-btn" data-sc="hist" onclick="selectSC('hist',this)">Activities per day</button>
       <button class="sc-btn" data-sc="float" onclick="selectSC('float',this)">Float burn-down</button>
       <button class="sc-btn" data-sc="combined_lh" onclick="selectSC('combined_lh',this)" id="btn-sc-combined" style="display:none">Combined manhours</button>
@@ -1522,12 +1528,14 @@ function computeLiveCharts(){
   var earlyLHByDay={}, earlyActByDay={}, earlyCPByDay={};
   var lateLHByDay={}, lateActByDay={}, lateCPByDay={};
   var histByDay={}, cpByDay={}, actualCPByDay={};
+  var cpLHByDay={}, earlyCPLHByDay={}, lateCPLHByDay={}, actualCPLHByDay={};
   allDays.forEach(function(dk){
     planLHByDay[dk]=0; planActByDay[dk]=0;
     actualLHByDay[dk]=0; actualActByDay[dk]=0;
     earlyLHByDay[dk]=0; earlyActByDay[dk]=0; earlyCPByDay[dk]=0;
     lateLHByDay[dk]=0; lateActByDay[dk]=0; lateCPByDay[dk]=0;
     histByDay[dk]=0; cpByDay[dk]=0; actualCPByDay[dk]=0;
+    cpLHByDay[dk]=0; earlyCPLHByDay[dk]=0; lateCPLHByDay[dk]=0; actualCPLHByDay[dk]=0;
   });
 
   var totalPlanLH=0, totalActs=0, totalCPActs=0;
@@ -1597,6 +1605,14 @@ function computeLiveCharts(){
     var lEnd=new Date(lateFd+'T00:00:00');
     while(d<=lEnd){var k=fmtDateJS(d);if(lateLHByDay.hasOwnProperty(k))lateDays.push(k);d.setDate(d.getDate()+1);}
     if(lateDays.length>0){var lhd=(a.plan_lh||0)/lateDays.length;lateDays.forEach(function(k){lateLHByDay[k]+=lhd;});}
+
+    // CP manhours distribution (only for near-critical activities)
+    if(isCP){
+      if(blDays.length>0){var cpLhd=(a.plan_lh||0)/blDays.length;blDays.forEach(function(k){if(cpLHByDay.hasOwnProperty(k))cpLHByDay[k]+=cpLhd;});}
+      if(eDays.length>0){var cpLhd=(a.plan_lh||0)/eDays.length;eDays.forEach(function(k){if(earlyCPLHByDay.hasOwnProperty(k))earlyCPLHByDay[k]+=cpLhd;});}
+      if(lateDays.length>0){var cpLhd=(a.plan_lh||0)/lateDays.length;lateDays.forEach(function(k){if(lateCPLHByDay.hasOwnProperty(k))lateCPLHByDay[k]+=cpLhd;});}
+      if(a.actual_lh>0&&lhActFd&&actualCPLHByDay.hasOwnProperty(lhActFd)) actualCPLHByDay[lhActFd]+=a.actual_lh;
+    }
   });
 
   // Float pool for burn-down (TAR window only)
@@ -1610,6 +1626,7 @@ function computeLiveCharts(){
   // Build cumulative chart points over FULL date range
   var cumPLH=0,cumALH=0,cumPA=0,cumAA=0,cumCP=0,cumACP=0;
   var cumELH=0,cumEA=0,cumECP=0,cumLLH=0,cumLA=0,cumLCP=0;
+  var cumCPLH=0,cumECPLH=0,cumLCPLH=0,cumACPLH=0;
   var pts=allDays.map(function(dk){
     cumPLH+=planLHByDay[dk]||0;
     cumALH+=actualLHByDay[dk]||0;
@@ -1623,6 +1640,10 @@ function computeLiveCharts(){
     cumLLH+=lateLHByDay[dk]||0;
     cumLA+=lateActByDay[dk]||0;
     cumLCP+=lateCPByDay[dk]||0;
+    cumCPLH+=cpLHByDay[dk]||0;
+    cumECPLH+=earlyCPLHByDay[dk]||0;
+    cumLCPLH+=lateCPLHByDay[dk]||0;
+    cumACPLH+=actualCPLHByDay[dk]||0;
 
     // Float burn-down
     var dayDate=new Date(dk+'T00:00:00');
@@ -1644,6 +1665,7 @@ function computeLiveCharts(){
       actual_lh:Math.round(cumALH),
       plan_acts:cumPA, early_acts:cumEA, late_acts:cumLA, actual_acts:cumAA,
       plan_cp:cumCP,   early_cp:cumECP,  late_cp:cumLCP,  actual_cp:cumACP,
+      plan_cp_lh:Math.round(cumCPLH), early_cp_lh:Math.round(cumECPLH), late_cp_lh:Math.round(cumLCPLH), actual_cp_lh:Math.round(cumACPLH),
       hist:histByDay[dk]||0,
       actual_hist:actualActByDay[dk]||0,
       avg_float:dk>=TAR_START_STR&&dk<=TAR_END_STR?avgFloat:null
@@ -1775,7 +1797,7 @@ function renderThreeCurve(cfg, pts, eqFilter){
   } else if(field==='acts'){
     lateKey='late_acts'; blKey='plan_acts'; earlyKey='early_acts'; actualKey='actual_acts';
   } else if(field==='cp'){
-    lateKey='late_cp'; blKey='plan_cp'; earlyKey='early_cp'; actualKey='actual_cp';
+    lateKey='late_cp_lh'; blKey='plan_cp_lh'; earlyKey='early_cp_lh'; actualKey='actual_cp_lh';
   } else if(field==='cp_acts'){
     lateKey='late_cp'; blKey='plan_cp'; earlyKey='early_cp'; actualKey='actual_cp';
   } else {
@@ -2293,9 +2315,9 @@ function updateSCPctComplete(key) {
     if(planLbl) planLbl.textContent = 'Plan % (activities)';
     if(actLbl)  actLbl.textContent  = 'Actual % (activities)';
   } else if(key === 'cp') {
-    total      = lastPt.plan_cp || 0;
-    planToday  = todayPt ? (todayPt.plan_cp || 0) : 0;
-    var actualNow = todayPt ? (todayPt.actual_cp || 0) : 0;
+    total      = lastPt.plan_cp_lh || 0;
+    planToday  = todayPt ? (todayPt.plan_cp_lh || 0) : 0;
+    var actualNow = todayPt ? (todayPt.actual_cp_lh || 0) : 0;
     planPct   = total > 0 ? Math.round(planToday / total * 100) : 0;
     actualPct = total > 0 ? Math.round(actualNow / total * 100) : 0;
     if(planLbl) planLbl.textContent = 'Plan % (CP manhours)';
@@ -2631,6 +2653,7 @@ function computeFilteredSC(eqFilter){
       plan_lh:cLhBL[dk]||0, early_lh:cLhE[dk]||0, late_lh:cLhL[dk]||0, actual_lh:cLhA[dk]||0,
       plan_acts:cABL[dk]||0, early_acts:cAE[dk]||0, late_acts:cAL[dk]||0, actual_acts:cAA[dk]||0,
       plan_cp:cCpBL[dk]||0, early_cp:cCpE[dk]||0, late_cp:cCpL[dk]||0, actual_cp:cCpA[dk]||0,
+      plan_cp_lh:0, early_cp_lh:0, late_cp_lh:0, actual_cp_lh:0,
       hist:hist[dk]||0, actual_hist:histA[dk]||0, avg_float:null
     };
   });
@@ -2666,6 +2689,22 @@ function buildSCStats(){
     '<div class="stat"><div class="stat-label">Plan acts (as at '+selectedDate+')</div><div class="stat-val">'+Math.round(planActsToDate).toLocaleString()+'</div></div>'+
     '<div class="stat"><div class="stat-label">Critical path acts</div><div class="stat-val danger">'+meta.total_cp_acts+'</div></div>'+
     '<div class="stat"><div class="stat-label">Actual complete (as at '+selectedDate+')</div><div class="stat-val">'+Math.round(actualActs).toLocaleString()+'</div></div>';
+}
+window.scScope='standard';
+function setSCScope(scope){
+  window.scScope=scope;
+  document.getElementById('scope-standard').className='sc-scope-btn'+(scope==='standard'?' active':'');
+  document.getElementById('scope-cp').className='sc-scope-btn'+(scope==='cp'?' active':'');
+  // Re-select the current chart type with new scope
+  var btns=document.querySelectorAll('.sc-btn');
+  var activeBtn=null;
+  btns.forEach(function(b){if(b.classList.contains('active'))activeBtn=b;});
+  if(activeBtn){
+    var label=activeBtn.textContent;
+    if(label.indexOf('Manhours')>=0) selectSC(scope==='cp'?'cp':'lh',activeBtn);
+    else if(label.indexOf('Activity')>=0&&label.indexOf('per day')<0) selectSC(scope==='cp'?'cp_acts':'acts',activeBtn);
+    else selectSC(activeSC,activeBtn);
+  }
 }
 function selectSC(key,btn){
   activeSC=key;
