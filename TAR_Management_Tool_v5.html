@@ -30,8 +30,138 @@
   Chart.prototype.destroy = function(){
     this._dead = true;
     if(this._ro){ this._ro.disconnect(); }
+    if(this._detachEvents){ this._detachEvents(); }
     var i = _all.indexOf(this);
     if(i >= 0) _all.splice(i, 1);
+  };
+
+  // Mouse events: hit-test by nearest x-index, build a Chart.js-shaped
+  // context object, and invoke the tooltip.external callback (or a default
+  // tooltip renderer when none is provided). Also wires onClick.
+  Chart.prototype._attachEvents = function(){
+    if(this._eventsAttached) return;
+    this._eventsAttached = true;
+    var self = this;
+    var cv = this.ctx.canvas;
+
+    function findIndex(evt){
+      var g = self._geom; if(!g) return null;
+      var r = cv.getBoundingClientRect();
+      var x = evt.clientX - r.left, y = evt.clientY - r.top;
+      if(x < g.pad.l || x > g.pad.l + g.pw) return null;
+      if(y < g.pad.t || y > g.pad.t + g.ph) return null;
+      var n = g.labels.length; if(n <= 0) return null;
+      var rel = (x - g.pad.l) / g.pw;
+      var idx = g.hasBars ? Math.floor(rel * n)
+                          : (n <= 1 ? 0 : Math.round(rel * (n - 1)));
+      return Math.max(0, Math.min(n - 1, idx));
+    }
+
+    function buildContext(idx){
+      var g = self._geom;
+      var dss = (self.config.data || {}).datasets || [];
+      var dataPoints = [];
+      dss.forEach(function(ds, dsi){
+        var v = (ds.data || [])[idx];
+        if(v == null || isNaN(+v)) return;
+        dataPoints.push({
+          parsed: {x: idx, y: +v},
+          dataset: ds,
+          datasetIndex: dsi,
+          label: g.labels[idx],
+          index: idx,
+          raw: v
+        });
+      });
+      var caretX = g.hasBars ? g.Xb(idx) : g.X(idx);
+      var ys = dataPoints.map(function(dp){ return g.Y(dp.parsed.y); });
+      var caretY = ys.length
+        ? ys.reduce(function(s,v){return s+v;}, 0) / ys.length
+        : g.pad.t + g.ph / 2;
+      return {
+        chart: self,
+        tooltip: {
+          opacity: dataPoints.length ? 1 : 0,
+          dataPoints: dataPoints,
+          caretX: caretX,
+          caretY: caretY
+        }
+      };
+    }
+
+    function defaultTooltip(ctxObj){
+      var tip = document.getElementById('__chart_shim_default_tip');
+      if(!tip){
+        tip = document.createElement('div');
+        tip.id = '__chart_shim_default_tip';
+        tip.style.cssText = 'position:fixed;background:rgba(0,0,0,.82);color:#fff;padding:8px 12px;border-radius:6px;font-size:12px;pointer-events:none;z-index:9999;line-height:1.6;transition:opacity .08s;opacity:0';
+        document.body.appendChild(tip);
+      }
+      var t = ctxObj.tooltip;
+      if(t.opacity === 0){ tip.style.opacity = '0'; return; }
+      var rows = t.dataPoints.map(function(dp){
+        var c = dp.dataset.borderColor || dp.dataset.backgroundColor || '#fff';
+        var v = dp.parsed.y;
+        return '<div><span style="color:'+c+'">■</span> '+(dp.dataset.label||'')+': <b>'+(v!=null?Math.round(v).toLocaleString():'—')+'</b></div>';
+      }).join('');
+      tip.innerHTML = '<div style="font-weight:700;margin-bottom:4px">'+t.dataPoints[0].label+'</div>'+rows;
+      var r = cv.getBoundingClientRect();
+      var x = r.left + t.caretX + 12, y = r.top + t.caretY - 10;
+      if(x + 220 > window.innerWidth) x = r.left + t.caretX - 232;
+      tip.style.left = x + 'px';
+      tip.style.top  = y + 'px';
+      tip.style.opacity = '1';
+    }
+
+    function fire(idx){
+      var opts = self.config.options || {};
+      var tcfg = ((opts.plugins || {}).tooltip) || {};
+      var ctxObj = idx == null
+        ? {chart: self, tooltip: {opacity: 0, dataPoints: [], caretX: 0, caretY: 0}}
+        : buildContext(idx);
+      if(typeof tcfg.external === 'function'){
+        try { tcfg.external(ctxObj); } catch(e) {}
+      } else if(tcfg.enabled !== false){
+        defaultTooltip(ctxObj);
+      }
+    }
+
+    var lastIdx = -999;
+    var onMove = function(e){
+      if(self._dead) return;
+      var idx = findIndex(e);
+      if(idx === lastIdx) return;
+      lastIdx = idx;
+      fire(idx);
+    };
+    var onLeave = function(){
+      if(self._dead) return;
+      if(lastIdx === null) return;
+      lastIdx = null;
+      fire(null);
+    };
+    var onClick = function(e){
+      if(self._dead) return;
+      var idx = findIndex(e); if(idx == null) return;
+      var oc = (self.config.options || {}).onClick;
+      if(typeof oc === 'function'){
+        try { oc(e, [{index: idx, datasetIndex: 0}]); } catch(err) {}
+      }
+    };
+
+    cv.addEventListener('mousemove', onMove);
+    cv.addEventListener('mouseleave', onLeave);
+    cv.addEventListener('click', onClick);
+
+    if(self.config.options && typeof self.config.options.onClick === 'function'){
+      cv.style.cursor = 'pointer';
+    }
+
+    self._detachEvents = function(){
+      cv.removeEventListener('mousemove', onMove);
+      cv.removeEventListener('mouseleave', onLeave);
+      cv.removeEventListener('click', onClick);
+    };
   };
 
   Chart.prototype.update = function(){
@@ -75,6 +205,7 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     this._draw(ctx, cssW, cssH);
+    this._attachEvents();
 
     // Set up ResizeObserver to re-render if container resizes
     if(!this._ro && typeof ResizeObserver !== 'undefined' && par){
@@ -108,6 +239,14 @@
     var X=function(i){return labels.length<=1?pad.l+pw/2:pad.l+i/(labels.length-1)*pw;};
     var Y=function(v){return pad.t+ph-((+v-yMin)/yR)*ph;};
     var Xb=function(i){return pad.l+(i+0.5)/labels.length*pw;};
+
+    // Expose geometry for mouse hit-testing (used by tooltip/click handlers)
+    this._geom = {
+      pad:pad, pw:pw, ph:ph, W:W, H:H,
+      labels:labels, hasBars:hasBars,
+      yMin:yMin, yMax:yMax, yR:yR,
+      X:X, Y:Y, Xb:Xb
+    };
 
     // Background
     ctx.fillStyle='#f9fafb'; ctx.fillRect(0,0,W,H);
@@ -2381,33 +2520,57 @@ var BWPS = 50;
 function buildBehindData() {
   var today = getBehindDate();
   var behind = [];
+  var td = new Date(today + 'T00:00:00');
 
   allWO.forEach(function(wo) {
     (wo.acts||[]).forEach(function(a) {
       if(isMilestone(a.id, a.name)) return;
       if(a.status === 'Complete' || a.pct >= 100) return;
 
-      // Planned finish = baseline finish or BL finish
-      var plannedFinish = a.bl_finish || (a.finish ? a.finish.slice(0,10) : '');
-      // Expected/current finish
-      var expectedFinish = a.finish ? a.finish.slice(0,10) : '';
+      // Baseline (planned) dates — what the schedule committed to
+      var plannedStart  = a.bl_start  ? a.bl_start.slice(0,10)
+                        : (a.start    ? a.start.slice(0,10)  : '');
+      var plannedFinish = a.bl_finish ? a.bl_finish.slice(0,10)
+                        : (a.finish   ? a.finish.slice(0,10) : '');
+      // Expected/current finish from P6 (equals planned if not rescheduled)
+      var expectedFinish = a.finish ? a.finish.slice(0,10) : plannedFinish;
 
-      if(!plannedFinish || !expectedFinish) return;
+      if(!plannedFinish) return;
 
-      // Only include if expected finish is AFTER today AND after planned finish
-      // (i.e. not yet complete and running late)
-      var isLate = expectedFinish > plannedFinish && plannedFinish <= today;
+      // Three independent ways an activity can be behind:
+      //
+      // 1. Missed finish — baseline said it should be done by today, it isn't.
+      //    This is the primary test and doesn't depend on P6 having been rescheduled.
+      var missedFinish = plannedFinish <= today && (a.pct||0) < 100;
+      //
+      // 2. Not started late — baseline said start by now, no progress recorded.
+      //    Empty status and 0% progress is the signal, since a.start is just the
+      //    planned start in an unprogressed schedule.
+      var notStartedLate = plannedStart && plannedStart <= today
+                        && (!a.status || a.status === '')
+                        && (a.pct||0) === 0;
+      //
+      // 3. Expected slip — P6 HAS been rescheduled and expected finish is now
+      //    past baseline finish. Only fires when there's real progress data.
+      var expectedSlip = expectedFinish > plannedFinish && plannedFinish <= today;
 
-      // Also include activities that SHOULD have started by today but haven't
-      var shouldHaveStarted = plannedFinish <= today && !a.status && (!a.start || a.start.slice(0,10) > today);
-
-      if(!isLate && !shouldHaveStarted) return;
+      if(!missedFinish && !notStartedLate && !expectedSlip) return;
 
       try {
         var pf = new Date(plannedFinish + 'T00:00:00');
         var ef = new Date(expectedFinish + 'T00:00:00');
-        var slipDays = Math.round((ef - pf) / 86400000);
-        if(slipDays <= 0 && !shouldHaveStarted) return;
+
+        // Slip days = worst-case days past plan.
+        // For unprogressed schedules, this is (today - planned finish).
+        // For rescheduled/progressed, it's max of that and the rescheduled slip.
+        var byToday    = missedFinish    ? Math.round((td - pf) / 86400000) : 0;
+        var byExpected = expectedSlip    ? Math.round((ef - pf) / 86400000) : 0;
+        var byStart    = 0;
+        if(notStartedLate && plannedStart) {
+          var ps = new Date(plannedStart + 'T00:00:00');
+          byStart = Math.round((td - ps) / 86400000);
+        }
+        var slipDays = Math.max(byToday, byExpected, byStart, 0);
 
         behind.push({
           id: a.id,
@@ -2418,12 +2581,12 @@ function buildBehindData() {
           res: a.res || [],
           planned_finish: plannedFinish,
           expected_finish: expectedFinish,
-          slip_days: shouldHaveStarted ? Math.round((new Date(today) - pf) / 86400000) : slipDays,
+          slip_days: slipDays,
           plan_lh: a.plan_lh || 0,
           pct: a.pct || 0,
           fd: a.fd,
           fs: a.fs,
-          not_started: shouldHaveStarted
+          not_started: notStartedLate && (a.pct||0) === 0
         });
       } catch(e) {}
     });
