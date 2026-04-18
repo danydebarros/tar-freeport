@@ -773,7 +773,69 @@ function calcHC(lh, durH){
   return Math.round(lh/durH*10)/10;
 }
 
+// Resource Usage headcount from Resource Usage sheet (budgeted % / 100 per resource per WO)
+var RES_USAGE = {};
+function woHeadcount(woId){
+  if(RES_USAGE[woId]) return RES_USAGE[woId].hc;
+  // Fallback: count unique resource names
+  var wo = (allWO||[]).find(function(w){return w.id===woId;});
+  return wo && wo.res ? wo.res.length : 0;
+}
+
+// ── Resource Usage fetch from Google Sheets ──────────────────────────────
+var RES_USAGE_SHEET_ID = '1asMJpbIROrlT4x9cKK9jn-W2TXEhsLuaT__98wWkG9g';
+
+function fetchResUsage() {
+  var url = 'https://docs.google.com/spreadsheets/d/' + RES_USAGE_SHEET_ID + 
+            '/export?format=csv&gid=1412054216';
+  fetch(url, {credentials:'include'})
+    .then(function(r){ return r.text(); })
+    .then(function(csv){
+      var rows = csv.split('\n').map(function(line){
+        var result=[],current='',inQuote=false;
+        for(var i=0;i<line.length;i++){
+          var ch=line[i];
+          if(ch==='"'){inQuote=!inQuote;}
+          else if(ch===','&&!inQuote){result.push(current.trim());current='';}
+          else{current+=ch;}
+        }
+        result.push(current.trim().replace(/\r$/,''));
+        return result;
+      });
+      var currentWO='', woResMap={};
+      rows.slice(1).forEach(function(r){
+        var actId=r[0],resId=r[2],pctStr=r[3];
+        if(!actId)return;
+        if(actId.startsWith('W-')){currentWO=actId.split(' ')[0];return;}
+        if(!resId||!pctStr||!currentWO)return;
+        var hc=pctStr.endsWith('%')?parseFloat(pctStr)/100:(parseFloat(pctStr)||1);
+        if(!woResMap[currentWO])woResMap[currentWO]={};
+        if(!woResMap[currentWO][resId]||hc>woResMap[currentWO][resId])
+          woResMap[currentWO][resId]=hc;
+      });
+      Object.keys(woResMap).forEach(function(wo){
+        var sum=0;
+        Object.values(woResMap[wo]).forEach(function(hc){sum+=hc;});
+        RES_USAGE[wo]={hc:Math.round(sum*10)/10};
+      });
+      // Re-render WO table to show correct headcounts
+      if(typeof filterWOs==='function') filterWOs();
+      console.log('Resource Usage loaded: '+Object.keys(RES_USAGE).length+' WOs');
+    })
+    .catch(function(e){ console.log('Resource Usage fetch failed (offline mode): '+e); });
+}
+
+function loadResUsage(data){
+  RES_USAGE = data;
+  // Re-render if table is showing
+  if(document.getElementById('panel-wo') && document.getElementById('panel-wo').style.display !== 'none'){
+    filterWOs();
+  }
+}
+
 window.addEventListener('load',function(){
+  // Load resource headcounts from sheet
+  fetchResUsage();
   // Pre-fill main URL and auto-connect
   var scriptInput=document.getElementById('script-url');
   if(liveUrl){
@@ -1007,7 +1069,11 @@ function renderWOTable(){
   tbody.innerHTML=page.map(function(wo){
     var f=fc(wo.mf);
     var fd=wo.mf!=null?'<span class="dot" style="background:'+f+'"></span>'+wo.mf.toFixed(1)+'d':'—';
-    var rd=wo.res&&wo.res.length?wo.res.map(function(r){return'<span class="chip">'+sn(r)+'</span>';}).join(''):'<span style="color:#A32D2D;font-size:11px">Not assigned</span>';
+    var hc=woHeadcount(wo.id);
+    var rd=wo.res&&wo.res.length?
+      '<span style="font-weight:700;font-size:12px;color:#1E3A5F;margin-right:6px">'+hc+'</span>'+
+      wo.res.map(function(r){return'<span class="chip">'+sn(r)+'</span>';}).join(''):
+      '<span style="color:#A32D2D;font-size:11px">Not assigned</span>';
     var pct=wo.plan_lh>0?Math.min(100,Math.round((wo.actual_lh||0)/wo.plan_lh*100)):0;
     var desc=wo.name.replace(/^W-\d+\s*/,'');
     return'<tr onclick="selectWO(\''+wo.id+'\')" id="wo-row-'+wo.id+'" style="cursor:pointer">'+
