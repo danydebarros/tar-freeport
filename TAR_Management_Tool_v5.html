@@ -12,6 +12,7 @@
 
   function Chart(ctx, config){
     this.ctx = ctx;
+    this.canvas = ctx && ctx.canvas ? ctx.canvas : null;
     this.config = config;
     this._dead = false;
     _all.push(this);
@@ -123,7 +124,12 @@
         ? {chart: self, tooltip: {opacity: 0, dataPoints: [], caretX: 0, caretY: 0}}
         : buildContext(idx);
       if(typeof tcfg.external === 'function'){
-        try { tcfg.external(ctxObj); } catch(e) {}
+        try { tcfg.external(ctxObj); }
+        catch(e) {
+          if(typeof console !== 'undefined' && console.error){
+            console.error('tooltip.external threw:', e);
+          }
+        }
       } else if(tcfg.enabled !== false){
         defaultTooltip(ctxObj);
       }
