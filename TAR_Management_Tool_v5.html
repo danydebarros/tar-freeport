@@ -47,11 +47,12 @@
     function findIndex(evt){
       var g = self._geom; if(!g) return null;
       var r = cv.getBoundingClientRect();
-      var x = evt.clientX - r.left, y = evt.clientY - r.top;
-      if(x < g.pad.l || x > g.pad.l + g.pw) return null;
-      if(y < g.pad.t || y > g.pad.t + g.ph) return null;
+      var x = evt.clientX - r.left;
+      // X bounds with small buffer; no Y bounds (anywhere on canvas is fine,
+      // prevents flicker at chart edges)
+      if(x < g.pad.l - 4 || x > g.pad.l + g.pw + 4) return null;
       var n = g.labels.length; if(n <= 0) return null;
-      var rel = (x - g.pad.l) / g.pw;
+      var rel = Math.max(0, Math.min(1, (x - g.pad.l) / g.pw));
       var idx = g.hasBars ? Math.floor(rel * n)
                           : (n <= 1 ? 0 : Math.round(rel * (n - 1)));
       return Math.max(0, Math.min(n - 1, idx));
@@ -74,10 +75,12 @@
         });
       });
       var caretX = g.hasBars ? g.Xb(idx) : g.X(idx);
+      // caretY = topmost (smallest Y coord = highest value) data point, so
+      // tooltips anchor next to the uppermost line rather than floating at
+      // the average — matches Chart.js default "nearest top" behaviour.
       var ys = dataPoints.map(function(dp){ return g.Y(dp.parsed.y); });
-      var caretY = ys.length
-        ? ys.reduce(function(s,v){return s+v;}, 0) / ys.length
-        : g.pad.t + g.ph / 2;
+      var caretY = ys.length ? Math.min.apply(null, ys)
+                             : g.pad.t + g.ph / 2;
       return {
         chart: self,
         tooltip: {
@@ -418,6 +421,65 @@
   }
 
   global.Chart = Chart;
+
+  // Shared tooltip renderer — used by all chart tooltip.external callbacks.
+  // Handles: viewport edge detection (flips left if off-screen right,
+  // clamps vertically), opacity transitions (smooth, no flicker), tight
+  // styling. Callbacks just pass their own header/rows HTML.
+  global.renderSCTip = function(context, headerHTML, rowsHTML){
+    var tip = document.getElementById('sc-hover-tooltip');
+    if(!tip){
+      tip = document.createElement('div');
+      tip.id = 'sc-hover-tooltip';
+      tip.style.cssText =
+        'position:fixed;background:#1E3A5F;color:#fff;' +
+        'padding:8px 11px;border-radius:6px;font-size:12px;' +
+        'pointer-events:none;z-index:9999;' +
+        'box-shadow:0 4px 14px rgba(0,0,0,.22);' +
+        'line-height:1.5;max-width:280px;' +
+        'opacity:0;transition:opacity .08s ease-out;' +
+        'will-change:transform,opacity;';
+      document.body.appendChild(tip);
+    }
+    var t = context.tooltip;
+    if(t.opacity === 0){ tip.style.opacity = '0'; return; }
+
+    tip.innerHTML =
+      '<div style="font-weight:700;font-size:12px;margin-bottom:5px;' +
+      'padding-bottom:4px;border-bottom:1px solid rgba(255,255,255,.18)">' +
+      headerHTML + '</div>' + rowsHTML;
+
+    // Measure, then position with viewport edge detection
+    var tw = tip.offsetWidth, th = tip.offsetHeight;
+    var r = context.chart.canvas.getBoundingClientRect();
+    var vw = window.innerWidth, vh = window.innerHeight;
+
+    // Default: to the right of caret, vertically centered on it
+    var tx = r.left + t.caretX + 12;
+    var ty = r.top  + t.caretY - th / 2;
+
+    // Flip to left side if it would overflow the right edge
+    if(tx + tw > vw - 8) tx = r.left + t.caretX - tw - 12;
+    // Clamp to viewport
+    if(tx < 8) tx = 8;
+    if(ty < 8) ty = 8;
+    if(ty + th > vh - 8) ty = vh - th - 8;
+
+    tip.style.left = tx + 'px';
+    tip.style.top  = ty + 'px';
+    tip.style.opacity = '1';
+  };
+
+  // Standard row formatter — keeps the three callbacks DRY
+  global.renderSCTipRow = function(dp){
+    var c = dp.dataset.borderColor || dp.dataset.backgroundColor || '#fff';
+    var v = dp.parsed.y;
+    var val = v != null ? Math.round(v).toLocaleString() : '—';
+    return '<div style="display:flex;justify-content:space-between;gap:18px;align-items:center">' +
+      '<span style="color:' + c + ';font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (dp.dataset.label || '') + '</span>' +
+      '<span style="font-weight:700;flex-shrink:0">' + val + '</span>' +
+      '</div>';
+  };
 })(typeof window!=='undefined'?window:this);
 </script>
 
@@ -1965,34 +2027,10 @@ function renderThreeCurve(cfg, pts, eqFilter){
           mode:'index',
           intersect:false,
           external:function(context){
-            var tooltipEl = document.getElementById('sc-hover-tooltip');
-            if(!tooltipEl){
-              tooltipEl = document.createElement('div');
-              tooltipEl.id = 'sc-hover-tooltip';
-              tooltipEl.style.cssText = 'position:absolute;background:#1E3A5F;color:#fff;padding:10px 14px;border-radius:8px;font-size:12px;pointer-events:none;z-index:999;min-width:220px;box-shadow:0 4px 16px rgba(0,0,0,.2);line-height:1.8';
-              document.body.appendChild(tooltipEl);
-            }
-            var tooltip = context.tooltip;
-            if(tooltip.opacity === 0){
-              tooltipEl.style.display='none';
-              return;
-            }
-            if(tooltip.dataPoints && tooltip.dataPoints.length){
-              var date = tooltip.dataPoints[0].label;
-              var rows = tooltip.dataPoints.map(function(dp){
-                var v = dp.parsed.y;
-                var color = dp.dataset.borderColor || '#fff';
-                return '<div style="display:flex;justify-content:space-between;gap:16px">' +
-                  '<span style="color:'+color+';font-weight:600">'+dp.dataset.label+'</span>' +
-                  '<span style="font-weight:700">'+(v!=null?Math.round(v).toLocaleString():'—')+'</span>' +
-                  '</div>';
-              }).join('');
-              tooltipEl.innerHTML = '<div style="font-weight:700;margin-bottom:6px;font-size:13px">'+date+'</div>'+rows;
-              tooltipEl.style.display='block';
-            }
-            var canvasRect = context.chart.canvas.getBoundingClientRect();
-            tooltipEl.style.left = (canvasRect.left + window.scrollX + tooltip.caretX + 12) + 'px';
-            tooltipEl.style.top  = (canvasRect.top  + window.scrollY + tooltip.caretY - 10) + 'px';
+            var t = context.tooltip;
+            if(t.opacity === 0){ renderSCTip(context,'',''); return; }
+            var rows = (t.dataPoints||[]).map(renderSCTipRow).join('');
+            renderSCTip(context, t.dataPoints[0].label, rows);
           }
         }
       },
@@ -2312,24 +2350,10 @@ function renderCombinedSCurve(){
           mode:'index',
           intersect:false,
           external:function(context){
-            var tip=document.getElementById('sc-hover-tooltip');
-            if(!tip){tip=document.createElement('div');tip.id='sc-hover-tooltip';
-              tip.style.cssText='position:fixed;background:#1E3A5F;color:#fff;padding:10px 14px;border-radius:8px;font-size:12px;pointer-events:none;z-index:9999;min-width:200px;box-shadow:0 4px 16px rgba(0,0,0,.25);line-height:1.9';
-              document.body.appendChild(tip);}
-            var t=context.tooltip;
-            if(t.opacity===0){tip.style.opacity='0';return;}
-            if(t.dataPoints&&t.dataPoints.length){
-              var rows=t.dataPoints.map(function(dp){
-                var v=dp.parsed.y;
-                return '<div style="display:flex;justify-content:space-between;gap:20px"><span style="color:'+dp.dataset.borderColor+'">'+dp.dataset.label+'</span><span style="font-weight:700">'+(v!=null?Math.round(v).toLocaleString():'—')+'</span></div>';
-              }).join('');
-              tip.innerHTML='<div style="font-weight:700;font-size:13px;margin-bottom:5px;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:4px">'+t.dataPoints[0].label+'</div>'+rows;
-              tip.style.opacity='1';
-            }
-            var r=context.chart.canvas.getBoundingClientRect();
-            var x=r.left+t.caretX+14,y=r.top+t.caretY-10;
-            if(x+240>window.innerWidth)x=r.left+t.caretX-254;
-            tip.style.left=x+'px';tip.style.top=y+'px';
+            var t = context.tooltip;
+            if(t.opacity === 0){ renderSCTip(context,'',''); return; }
+            var rows = (t.dataPoints||[]).map(renderSCTipRow).join('');
+            renderSCTip(context, t.dataPoints[0].label, rows);
           }}},
       scales:{
         x:{grid:{color:'rgba(0,0,0,.05)'},ticks:{font:{size:10},maxRotation:45,autoSkip:true,maxTicksLimit:25}},
@@ -2963,24 +2987,10 @@ function renderSC(key){
           mode:'index',
           intersect:false,
           external:function(context){
-            var tip=document.getElementById('sc-hover-tooltip');
-            if(!tip){tip=document.createElement('div');tip.id='sc-hover-tooltip';
-              tip.style.cssText='position:fixed;background:#1E3A5F;color:#fff;padding:10px 14px;border-radius:8px;font-size:12px;pointer-events:none;z-index:9999;min-width:200px;box-shadow:0 4px 16px rgba(0,0,0,.25);line-height:1.9';
-              document.body.appendChild(tip);}
-            var t=context.tooltip;
-            if(t.opacity===0){tip.style.opacity='0';return;}
-            if(t.dataPoints&&t.dataPoints.length){
-              var rows=t.dataPoints.map(function(dp){
-                var v=dp.parsed.y;
-                return '<div style="display:flex;justify-content:space-between;gap:20px"><span style="color:'+dp.dataset.borderColor+'">'+dp.dataset.label+'</span><span style="font-weight:700">'+(v!=null?Math.round(v).toLocaleString():'—')+'</span></div>';
-              }).join('');
-              tip.innerHTML='<div style="font-weight:700;font-size:13px;margin-bottom:5px;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:4px">'+t.dataPoints[0].label+'</div>'+rows;
-              tip.style.opacity='1';
-            }
-            var r=context.chart.canvas.getBoundingClientRect();
-            var x=r.left+t.caretX+14,y=r.top+t.caretY-10;
-            if(x+240>window.innerWidth)x=r.left+t.caretX-254;
-            tip.style.left=x+'px';tip.style.top=y+'px';
+            var t = context.tooltip;
+            if(t.opacity === 0){ renderSCTip(context,'',''); return; }
+            var rows = (t.dataPoints||[]).map(renderSCTipRow).join('');
+            renderSCTip(context, t.dataPoints[0].label, rows);
           }}},
       scales:{x:{grid:{color:'rgba(0,0,0,.05)'},ticks:{font:{size:11}}},y:scaleY},
       interaction:{mode:'index',intersect:false}}});
