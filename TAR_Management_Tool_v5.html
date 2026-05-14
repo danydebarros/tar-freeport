@@ -2433,12 +2433,15 @@ function buildBehindData() {
 
       if(!plannedFinish || !expectedFinish) return;
 
-      // Only include if expected finish is AFTER today AND after planned finish
-      // (i.e. not yet complete and running late)
+      // If not started and planned finish has passed, expected finish = today
+      var notStarted = !a.status && a.pct === 0;
+      if(notStarted && plannedFinish < today) expectedFinish = today;
+
+      // Only include if expected finish is AFTER planned finish and planned finish has passed
       var isLate = expectedFinish > plannedFinish && plannedFinish <= today;
 
       // Also include activities that SHOULD have started by today but haven't
-      var shouldHaveStarted = plannedFinish <= today && !a.status && (!a.start || a.start.slice(0,10) > today);
+      var shouldHaveStarted = plannedFinish <= today && notStarted;
 
       if(!isLate && !shouldHaveStarted) return;
 
