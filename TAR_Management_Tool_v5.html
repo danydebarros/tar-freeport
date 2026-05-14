@@ -12,7 +12,6 @@
 
   function Chart(ctx, config){
     this.ctx = ctx;
-    this.canvas = ctx && ctx.canvas ? ctx.canvas : null;
     this.config = config;
     this._dead = false;
     _all.push(this);
@@ -31,146 +30,8 @@
   Chart.prototype.destroy = function(){
     this._dead = true;
     if(this._ro){ this._ro.disconnect(); }
-    if(this._detachEvents){ this._detachEvents(); }
     var i = _all.indexOf(this);
     if(i >= 0) _all.splice(i, 1);
-  };
-
-  // Mouse events: hit-test by nearest x-index, build a Chart.js-shaped
-  // context object, and invoke the tooltip.external callback (or a default
-  // tooltip renderer when none is provided). Also wires onClick.
-  Chart.prototype._attachEvents = function(){
-    if(this._eventsAttached) return;
-    this._eventsAttached = true;
-    var self = this;
-    var cv = this.ctx.canvas;
-
-    function findIndex(evt){
-      var g = self._geom; if(!g) return null;
-      var r = cv.getBoundingClientRect();
-      var x = evt.clientX - r.left;
-      // X bounds with small buffer; no Y bounds (anywhere on canvas is fine,
-      // prevents flicker at chart edges)
-      if(x < g.pad.l - 4 || x > g.pad.l + g.pw + 4) return null;
-      var n = g.labels.length; if(n <= 0) return null;
-      var rel = Math.max(0, Math.min(1, (x - g.pad.l) / g.pw));
-      var idx = g.hasBars ? Math.floor(rel * n)
-                          : (n <= 1 ? 0 : Math.round(rel * (n - 1)));
-      return Math.max(0, Math.min(n - 1, idx));
-    }
-
-    function buildContext(idx){
-      var g = self._geom;
-      var dss = (self.config.data || {}).datasets || [];
-      var dataPoints = [];
-      dss.forEach(function(ds, dsi){
-        var v = (ds.data || [])[idx];
-        if(v == null || isNaN(+v)) return;
-        dataPoints.push({
-          parsed: {x: idx, y: +v},
-          dataset: ds,
-          datasetIndex: dsi,
-          label: g.labels[idx],
-          index: idx,
-          raw: v
-        });
-      });
-      var caretX = g.hasBars ? g.Xb(idx) : g.X(idx);
-      // caretY = topmost (smallest Y coord = highest value) data point, so
-      // tooltips anchor next to the uppermost line rather than floating at
-      // the average — matches Chart.js default "nearest top" behaviour.
-      var ys = dataPoints.map(function(dp){ return g.Y(dp.parsed.y); });
-      var caretY = ys.length ? Math.min.apply(null, ys)
-                             : g.pad.t + g.ph / 2;
-      return {
-        chart: self,
-        tooltip: {
-          opacity: dataPoints.length ? 1 : 0,
-          dataPoints: dataPoints,
-          caretX: caretX,
-          caretY: caretY
-        }
-      };
-    }
-
-    function defaultTooltip(ctxObj){
-      var tip = document.getElementById('__chart_shim_default_tip');
-      if(!tip){
-        tip = document.createElement('div');
-        tip.id = '__chart_shim_default_tip';
-        tip.style.cssText = 'position:fixed;background:rgba(0,0,0,.82);color:#fff;padding:8px 12px;border-radius:6px;font-size:12px;pointer-events:none;z-index:9999;line-height:1.6;transition:opacity .08s;opacity:0';
-        document.body.appendChild(tip);
-      }
-      var t = ctxObj.tooltip;
-      if(t.opacity === 0){ tip.style.opacity = '0'; return; }
-      var rows = t.dataPoints.map(function(dp){
-        var c = dp.dataset.borderColor || dp.dataset.backgroundColor || '#fff';
-        var v = dp.parsed.y;
-        return '<div><span style="color:'+c+'">■</span> '+(dp.dataset.label||'')+': <b>'+(v!=null?Math.round(v).toLocaleString():'—')+'</b></div>';
-      }).join('');
-      tip.innerHTML = '<div style="font-weight:700;margin-bottom:4px">'+t.dataPoints[0].label+'</div>'+rows;
-      var r = cv.getBoundingClientRect();
-      var x = r.left + t.caretX + 12, y = r.top + t.caretY - 10;
-      if(x + 220 > window.innerWidth) x = r.left + t.caretX - 232;
-      tip.style.left = x + 'px';
-      tip.style.top  = y + 'px';
-      tip.style.opacity = '1';
-    }
-
-    function fire(idx){
-      var opts = self.config.options || {};
-      var tcfg = ((opts.plugins || {}).tooltip) || {};
-      var ctxObj = idx == null
-        ? {chart: self, tooltip: {opacity: 0, dataPoints: [], caretX: 0, caretY: 0}}
-        : buildContext(idx);
-      if(typeof tcfg.external === 'function'){
-        try { tcfg.external(ctxObj); }
-        catch(e) {
-          if(typeof console !== 'undefined' && console.error){
-            console.error('tooltip.external threw:', e);
-          }
-        }
-      } else if(tcfg.enabled !== false){
-        defaultTooltip(ctxObj);
-      }
-    }
-
-    var lastIdx = -999;
-    var onMove = function(e){
-      if(self._dead) return;
-      var idx = findIndex(e);
-      if(idx === lastIdx) return;
-      lastIdx = idx;
-      fire(idx);
-    };
-    var onLeave = function(){
-      if(self._dead) return;
-      if(lastIdx === null) return;
-      lastIdx = null;
-      fire(null);
-    };
-    var onClick = function(e){
-      if(self._dead) return;
-      var idx = findIndex(e); if(idx == null) return;
-      var oc = (self.config.options || {}).onClick;
-      if(typeof oc === 'function'){
-        try { oc(e, [{index: idx, datasetIndex: 0}]); } catch(err) {}
-      }
-    };
-
-    cv.addEventListener('mousemove', onMove);
-    cv.addEventListener('mouseleave', onLeave);
-    cv.addEventListener('click', onClick);
-
-    if(self.config.options && typeof self.config.options.onClick === 'function'){
-      cv.style.cursor = 'pointer';
-    }
-
-    self._detachEvents = function(){
-      cv.removeEventListener('mousemove', onMove);
-      cv.removeEventListener('mouseleave', onLeave);
-      cv.removeEventListener('click', onClick);
-    };
   };
 
   Chart.prototype.update = function(){
@@ -214,7 +75,6 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     this._draw(ctx, cssW, cssH);
-    this._attachEvents();
 
     // Set up ResizeObserver to re-render if container resizes
     if(!this._ro && typeof ResizeObserver !== 'undefined' && par){
@@ -248,14 +108,6 @@
     var X=function(i){return labels.length<=1?pad.l+pw/2:pad.l+i/(labels.length-1)*pw;};
     var Y=function(v){return pad.t+ph-((+v-yMin)/yR)*ph;};
     var Xb=function(i){return pad.l+(i+0.5)/labels.length*pw;};
-
-    // Expose geometry for mouse hit-testing (used by tooltip/click handlers)
-    this._geom = {
-      pad:pad, pw:pw, ph:ph, W:W, H:H,
-      labels:labels, hasBars:hasBars,
-      yMin:yMin, yMax:yMax, yR:yR,
-      X:X, Y:Y, Xb:Xb
-    };
 
     // Background
     ctx.fillStyle='#f9fafb'; ctx.fillRect(0,0,W,H);
@@ -427,65 +279,6 @@
   }
 
   global.Chart = Chart;
-
-  // Shared tooltip renderer — used by all chart tooltip.external callbacks.
-  // Handles: viewport edge detection (flips left if off-screen right,
-  // clamps vertically), opacity transitions (smooth, no flicker), tight
-  // styling. Callbacks just pass their own header/rows HTML.
-  global.renderSCTip = function(context, headerHTML, rowsHTML){
-    var tip = document.getElementById('sc-hover-tooltip');
-    if(!tip){
-      tip = document.createElement('div');
-      tip.id = 'sc-hover-tooltip';
-      tip.style.cssText =
-        'position:fixed;background:#1E3A5F;color:#fff;' +
-        'padding:8px 11px;border-radius:6px;font-size:12px;' +
-        'pointer-events:none;z-index:9999;' +
-        'box-shadow:0 4px 14px rgba(0,0,0,.22);' +
-        'line-height:1.5;max-width:280px;' +
-        'opacity:0;transition:opacity .08s ease-out;' +
-        'will-change:transform,opacity;';
-      document.body.appendChild(tip);
-    }
-    var t = context.tooltip;
-    if(t.opacity === 0){ tip.style.opacity = '0'; return; }
-
-    tip.innerHTML =
-      '<div style="font-weight:700;font-size:12px;margin-bottom:5px;' +
-      'padding-bottom:4px;border-bottom:1px solid rgba(255,255,255,.18)">' +
-      headerHTML + '</div>' + rowsHTML;
-
-    // Measure, then position with viewport edge detection
-    var tw = tip.offsetWidth, th = tip.offsetHeight;
-    var r = context.chart.canvas.getBoundingClientRect();
-    var vw = window.innerWidth, vh = window.innerHeight;
-
-    // Default: to the right of caret, vertically centered on it
-    var tx = r.left + t.caretX + 12;
-    var ty = r.top  + t.caretY - th / 2;
-
-    // Flip to left side if it would overflow the right edge
-    if(tx + tw > vw - 8) tx = r.left + t.caretX - tw - 12;
-    // Clamp to viewport
-    if(tx < 8) tx = 8;
-    if(ty < 8) ty = 8;
-    if(ty + th > vh - 8) ty = vh - th - 8;
-
-    tip.style.left = tx + 'px';
-    tip.style.top  = ty + 'px';
-    tip.style.opacity = '1';
-  };
-
-  // Standard row formatter — keeps the three callbacks DRY
-  global.renderSCTipRow = function(dp){
-    var c = dp.dataset.borderColor || dp.dataset.backgroundColor || '#fff';
-    var v = dp.parsed.y;
-    var val = v != null ? Math.round(v).toLocaleString() : '—';
-    return '<div style="display:flex;justify-content:space-between;gap:18px;align-items:center">' +
-      '<span style="color:' + c + ';font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (dp.dataset.label || '') + '</span>' +
-      '<span style="font-weight:700;flex-shrink:0">' + val + '</span>' +
-      '</div>';
-  };
 })(typeof window!=='undefined'?window:this);
 </script>
 
@@ -1096,7 +889,46 @@ function fetchLive(url){
     clearTimeout(timeout); delete window[cbName];
     try{document.body.removeChild(script);}catch(e){}
     if(data.error){setStatus('offline','Sheet error: '+data.error);loadData(offlinePayload());return;}
-    loadData(data);
+    // Merge live actuals onto baseline WO data
+    // Build act-level lookup from live response
+    var liveActMap = {};
+    (data.wos||[]).forEach(function(wo){
+      (wo.acts||[]).forEach(function(a){
+        liveActMap[a.id] = a;
+      });
+    });
+    // Apply live pct/actual_lh/status/dates to baseline WOs
+    var basePayload = offlinePayload();
+    basePayload.wos.forEach(function(wo){
+      var livePlanTotal=0, liveActualTotal=0;
+      (wo.acts||[]).forEach(function(a){
+        var live = liveActMap[a.id];
+        if(live){
+          a.pct        = live.pct        || 0;
+          a.actual_lh  = live.actual_lh  || Math.round((a.plan_lh||0)*(live.pct||0)/100*10)/10;
+          a.status     = live.status     || '';
+          a.start      = live.start      || a.start;
+          a.finish     = live.finish     || a.finish;
+          a.bl_start   = live.bl_start   || a.bl_start;
+          a.bl_finish  = live.bl_finish  || a.bl_finish;
+          a.late_finish= live.late_finish|| a.late_finish;
+          a.fd         = live.fd != null ? live.fd : a.fd;
+          a.fs         = live.fs         || a.fs;
+          a.res        = live.res && live.res.length ? live.res : a.res;
+        }
+        livePlanTotal   += a.plan_lh   || 0;
+        liveActualTotal += a.actual_lh || 0;
+      });
+      wo.plan_lh   = Math.round(livePlanTotal);
+      wo.actual_lh = Math.round(liveActualTotal);
+      // min float from acts
+      var minFd = null;
+      (wo.acts||[]).forEach(function(a){ if(a.fd!=null&&(minFd===null||a.fd<minFd)) minFd=a.fd; });
+      if(minFd!==null) wo.mf = minFd;
+    });
+    // Use live scurve if available (it uses correct hours from sheet)
+    if(data.scurve && data.scurve.total_plan_lh > 0) basePayload.scurve = data.scurve;
+    loadData(basePayload);
     setStatus('live','Live — updated '+new Date().toLocaleTimeString());
     if(refreshTimer)clearInterval(refreshTimer);
     refreshTimer=setInterval(function(){fetchLive(url);},5*60*1000);
@@ -2033,10 +1865,34 @@ function renderThreeCurve(cfg, pts, eqFilter){
           mode:'index',
           intersect:false,
           external:function(context){
-            var t = context.tooltip;
-            if(t.opacity === 0){ renderSCTip(context,'',''); return; }
-            var rows = (t.dataPoints||[]).map(renderSCTipRow).join('');
-            renderSCTip(context, t.dataPoints[0].label, rows);
+            var tooltipEl = document.getElementById('sc-hover-tooltip');
+            if(!tooltipEl){
+              tooltipEl = document.createElement('div');
+              tooltipEl.id = 'sc-hover-tooltip';
+              tooltipEl.style.cssText = 'position:absolute;background:#1E3A5F;color:#fff;padding:10px 14px;border-radius:8px;font-size:12px;pointer-events:none;z-index:999;min-width:220px;box-shadow:0 4px 16px rgba(0,0,0,.2);line-height:1.8';
+              document.body.appendChild(tooltipEl);
+            }
+            var tooltip = context.tooltip;
+            if(tooltip.opacity === 0){
+              tooltipEl.style.display='none';
+              return;
+            }
+            if(tooltip.dataPoints && tooltip.dataPoints.length){
+              var date = tooltip.dataPoints[0].label;
+              var rows = tooltip.dataPoints.map(function(dp){
+                var v = dp.parsed.y;
+                var color = dp.dataset.borderColor || '#fff';
+                return '<div style="display:flex;justify-content:space-between;gap:16px">' +
+                  '<span style="color:'+color+';font-weight:600">'+dp.dataset.label+'</span>' +
+                  '<span style="font-weight:700">'+(v!=null?Math.round(v).toLocaleString():'—')+'</span>' +
+                  '</div>';
+              }).join('');
+              tooltipEl.innerHTML = '<div style="font-weight:700;margin-bottom:6px;font-size:13px">'+date+'</div>'+rows;
+              tooltipEl.style.display='block';
+            }
+            var canvasRect = context.chart.canvas.getBoundingClientRect();
+            tooltipEl.style.left = (canvasRect.left + window.scrollX + tooltip.caretX + 12) + 'px';
+            tooltipEl.style.top  = (canvasRect.top  + window.scrollY + tooltip.caretY - 10) + 'px';
           }
         }
       },
@@ -2356,10 +2212,24 @@ function renderCombinedSCurve(){
           mode:'index',
           intersect:false,
           external:function(context){
-            var t = context.tooltip;
-            if(t.opacity === 0){ renderSCTip(context,'',''); return; }
-            var rows = (t.dataPoints||[]).map(renderSCTipRow).join('');
-            renderSCTip(context, t.dataPoints[0].label, rows);
+            var tip=document.getElementById('sc-hover-tooltip');
+            if(!tip){tip=document.createElement('div');tip.id='sc-hover-tooltip';
+              tip.style.cssText='position:fixed;background:#1E3A5F;color:#fff;padding:10px 14px;border-radius:8px;font-size:12px;pointer-events:none;z-index:9999;min-width:200px;box-shadow:0 4px 16px rgba(0,0,0,.25);line-height:1.9';
+              document.body.appendChild(tip);}
+            var t=context.tooltip;
+            if(t.opacity===0){tip.style.opacity='0';return;}
+            if(t.dataPoints&&t.dataPoints.length){
+              var rows=t.dataPoints.map(function(dp){
+                var v=dp.parsed.y;
+                return '<div style="display:flex;justify-content:space-between;gap:20px"><span style="color:'+dp.dataset.borderColor+'">'+dp.dataset.label+'</span><span style="font-weight:700">'+(v!=null?Math.round(v).toLocaleString():'—')+'</span></div>';
+              }).join('');
+              tip.innerHTML='<div style="font-weight:700;font-size:13px;margin-bottom:5px;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:4px">'+t.dataPoints[0].label+'</div>'+rows;
+              tip.style.opacity='1';
+            }
+            var r=context.chart.canvas.getBoundingClientRect();
+            var x=r.left+t.caretX+14,y=r.top+t.caretY-10;
+            if(x+240>window.innerWidth)x=r.left+t.caretX-254;
+            tip.style.left=x+'px';tip.style.top=y+'px';
           }}},
       scales:{
         x:{grid:{color:'rgba(0,0,0,.05)'},ticks:{font:{size:10},maxRotation:45,autoSkip:true,maxTicksLimit:25}},
@@ -2550,57 +2420,33 @@ var BWPS = 50;
 function buildBehindData() {
   var today = getBehindDate();
   var behind = [];
-  var td = new Date(today + 'T00:00:00');
 
   allWO.forEach(function(wo) {
     (wo.acts||[]).forEach(function(a) {
       if(isMilestone(a.id, a.name)) return;
       if(a.status === 'Complete' || a.pct >= 100) return;
 
-      // Baseline (planned) dates — what the schedule committed to
-      var plannedStart  = a.bl_start  ? a.bl_start.slice(0,10)
-                        : (a.start    ? a.start.slice(0,10)  : '');
-      var plannedFinish = a.bl_finish ? a.bl_finish.slice(0,10)
-                        : (a.finish   ? a.finish.slice(0,10) : '');
-      // Expected/current finish from P6 (equals planned if not rescheduled)
-      var expectedFinish = a.finish ? a.finish.slice(0,10) : plannedFinish;
+      // Planned finish = baseline finish or BL finish
+      var plannedFinish = a.bl_finish || (a.finish ? a.finish.slice(0,10) : '');
+      // Expected/current finish
+      var expectedFinish = a.finish ? a.finish.slice(0,10) : '';
 
-      if(!plannedFinish) return;
+      if(!plannedFinish || !expectedFinish) return;
 
-      // Three independent ways an activity can be behind:
-      //
-      // 1. Missed finish — baseline said it should be done by today, it isn't.
-      //    This is the primary test and doesn't depend on P6 having been rescheduled.
-      var missedFinish = plannedFinish <= today && (a.pct||0) < 100;
-      //
-      // 2. Not started late — baseline said start by now, no progress recorded.
-      //    Empty status and 0% progress is the signal, since a.start is just the
-      //    planned start in an unprogressed schedule.
-      var notStartedLate = plannedStart && plannedStart <= today
-                        && (!a.status || a.status === '')
-                        && (a.pct||0) === 0;
-      //
-      // 3. Expected slip — P6 HAS been rescheduled and expected finish is now
-      //    past baseline finish. Only fires when there's real progress data.
-      var expectedSlip = expectedFinish > plannedFinish && plannedFinish <= today;
+      // Only include if expected finish is AFTER today AND after planned finish
+      // (i.e. not yet complete and running late)
+      var isLate = expectedFinish > plannedFinish && plannedFinish <= today;
 
-      if(!missedFinish && !notStartedLate && !expectedSlip) return;
+      // Also include activities that SHOULD have started by today but haven't
+      var shouldHaveStarted = plannedFinish <= today && !a.status && (!a.start || a.start.slice(0,10) > today);
+
+      if(!isLate && !shouldHaveStarted) return;
 
       try {
         var pf = new Date(plannedFinish + 'T00:00:00');
         var ef = new Date(expectedFinish + 'T00:00:00');
-
-        // Slip days = worst-case days past plan.
-        // For unprogressed schedules, this is (today - planned finish).
-        // For rescheduled/progressed, it's max of that and the rescheduled slip.
-        var byToday    = missedFinish    ? Math.round((td - pf) / 86400000) : 0;
-        var byExpected = expectedSlip    ? Math.round((ef - pf) / 86400000) : 0;
-        var byStart    = 0;
-        if(notStartedLate && plannedStart) {
-          var ps = new Date(plannedStart + 'T00:00:00');
-          byStart = Math.round((td - ps) / 86400000);
-        }
-        var slipDays = Math.max(byToday, byExpected, byStart, 0);
+        var slipDays = Math.round((ef - pf) / 86400000);
+        if(slipDays <= 0 && !shouldHaveStarted) return;
 
         behind.push({
           id: a.id,
@@ -2611,12 +2457,12 @@ function buildBehindData() {
           res: a.res || [],
           planned_finish: plannedFinish,
           expected_finish: expectedFinish,
-          slip_days: slipDays,
+          slip_days: shouldHaveStarted ? Math.round((new Date(today) - pf) / 86400000) : slipDays,
           plan_lh: a.plan_lh || 0,
           pct: a.pct || 0,
           fd: a.fd,
           fs: a.fs,
-          not_started: notStartedLate && (a.pct||0) === 0
+          not_started: shouldHaveStarted
         });
       } catch(e) {}
     });
@@ -2993,10 +2839,24 @@ function renderSC(key){
           mode:'index',
           intersect:false,
           external:function(context){
-            var t = context.tooltip;
-            if(t.opacity === 0){ renderSCTip(context,'',''); return; }
-            var rows = (t.dataPoints||[]).map(renderSCTipRow).join('');
-            renderSCTip(context, t.dataPoints[0].label, rows);
+            var tip=document.getElementById('sc-hover-tooltip');
+            if(!tip){tip=document.createElement('div');tip.id='sc-hover-tooltip';
+              tip.style.cssText='position:fixed;background:#1E3A5F;color:#fff;padding:10px 14px;border-radius:8px;font-size:12px;pointer-events:none;z-index:9999;min-width:200px;box-shadow:0 4px 16px rgba(0,0,0,.25);line-height:1.9';
+              document.body.appendChild(tip);}
+            var t=context.tooltip;
+            if(t.opacity===0){tip.style.opacity='0';return;}
+            if(t.dataPoints&&t.dataPoints.length){
+              var rows=t.dataPoints.map(function(dp){
+                var v=dp.parsed.y;
+                return '<div style="display:flex;justify-content:space-between;gap:20px"><span style="color:'+dp.dataset.borderColor+'">'+dp.dataset.label+'</span><span style="font-weight:700">'+(v!=null?Math.round(v).toLocaleString():'—')+'</span></div>';
+              }).join('');
+              tip.innerHTML='<div style="font-weight:700;font-size:13px;margin-bottom:5px;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:4px">'+t.dataPoints[0].label+'</div>'+rows;
+              tip.style.opacity='1';
+            }
+            var r=context.chart.canvas.getBoundingClientRect();
+            var x=r.left+t.caretX+14,y=r.top+t.caretY-10;
+            if(x+240>window.innerWidth)x=r.left+t.caretX-254;
+            tip.style.left=x+'px';tip.style.top=y+'px';
           }}},
       scales:{x:{grid:{color:'rgba(0,0,0,.05)'},ticks:{font:{size:11}}},y:scaleY},
       interaction:{mode:'index',intersect:false}}});
