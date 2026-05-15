@@ -1584,14 +1584,11 @@ function computeLiveCharts(){
   // Get full date range from live data
   var minStart=null, maxFinish=null;
   acts.forEach(function(a){
-    if(a.start&&a.start.length>=10){
-      var s=a.start.slice(0,10);
-      if(!minStart||s<minStart) minStart=s;
-    }
-    if(a.finish&&a.finish.length>=10){
-      var f=a.finish.slice(0,10);
-      if(!maxFinish||f>maxFinish) maxFinish=f;
-    }
+    // Use bl_start for range — some milestones have bl_finish but no start
+    var s=(a.bl_start||a.start||'').slice(0,10);
+    if(s&&(!minStart||s<minStart)) minStart=s;
+    var f=(a.late_finish||a.bl_finish||a.finish||'').slice(0,10);
+    if(f&&(!maxFinish||f>maxFinish)) maxFinish=f;
   });
   var overallStart=minStart||'2026-04-13';
   var overallEnd=maxFinish||'2026-07-03';
