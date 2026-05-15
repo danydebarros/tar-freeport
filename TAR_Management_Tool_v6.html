@@ -1550,7 +1550,7 @@ function renderCPTable(){
     var resHtml=res.length?res.slice(0,4).map(function(r){return'<span class="chip warn">'+r+'</span>';}).join('')+(res.length>4?'<span style="color:#888;font-size:11px"> +'+( res.length-4)+' more</span>':''):'<span style="color:#A32D2D;font-size:11px;font-weight:600">⚠ Unresourced</span>';
     var ncCount=wo.acts.filter(function(a){return a.fd!=null&&a.fd<=3;}).length;
     var badge=ncCount>0?'<span style="background:#FFF3CD;color:#856404;font-size:10px;padding:1px 5px;border-radius:4px;margin-left:4px">'+ncCount+' near-critical</span>':'';
-    rows+='<tr class="cp-wo-row" onclick="toggleCPWO(''+wid+'')" style="cursor:pointer;background:#f0f4f9;border-top:2px solid #d0dae8">'+
+    rows+='<tr class="cp-wo-row" data-wid="'+wid+'" onclick="toggleCPWO(this.dataset.wid)" style="cursor:pointer;background:#f0f4f9;border-top:2px solid #d0dae8">'+
       '<td style="text-align:center;font-size:13px;color:#555" id="arrow_'+wid+'">▶</td>'+
       '<td style="font-family:monospace;font-size:11px;white-space:nowrap;color:#185FA5;font-weight:600">'+wo.id+'</td>'+
       '<td class="wrap" style="font-weight:600">'+wo.name+badge+'</td>'+
