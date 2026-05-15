@@ -738,7 +738,7 @@ var woPage=0; var WPS=50;
 var activeScChart=null, activeHistChart=null, activeSC='lh';
 var histRange='tar';
 // Default Apps Script URL - baked in so tool auto-connects without Setup
-var DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbylqA5Sf5fcdnaNl0uBkmhZST2v2M3DGK960raXVHSevzlgyHdtD7nrPonpTIxF9wx9/exec';
+var DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwA9v--9JCraJmumgCQlv1AZUBRAojcXz86oY6tdIQg5TckMsc9nStuXcKn11E3bcP_/exec';
 var liveUrl = localStorage.getItem('tar_url') || DEFAULT_SCRIPT_URL;
 var refreshTimer=null;
 var capMap={};  // resource name -> capacity
@@ -2000,7 +2000,7 @@ function renderThreeCurve(cfg, pts, eqFilter){
 var activeScope = 'main'; // 'main' | 'fco' | 'combined'
 var fcoWO = [];
 var fcoChartPoints = null;
-var DEFAULT_FCO_URL = 'https://script.google.com/macros/s/AKfycbyvDtercNp-8RoypxMbH4MYWC5g5r7SKvMZDXZ5XmEbK3KsQmxPiw8qxkB7zN6XLHMV/exec';
+var DEFAULT_FCO_URL = 'https://script.google.com/macros/s/AKfycbwA9v--9JCraJmumgCQlv1AZUBRAojcXz86oY6tdIQg5TckMsc9nStuXcKn11E3bcP_/exec';
 var fcoLiveUrl = localStorage.getItem('tar_fco_url') || DEFAULT_FCO_URL;
 var fcoRefreshTimer = null;
 
