@@ -577,12 +577,12 @@ tr.selected td{background:#EEF5FD}
       <select id="cp-res" onchange="filterCP()"><option value="">All resources</option></select>
     </div>
     <div class="tbl-wrap" style="max-height:500px;overflow-y:auto">
-      <table><thead><tr>
-        <th>Activity ID</th><th>Name</th><th>Work order</th><th>Equipment</th>
-        <th>Start</th><th>Finish</th><th>Duration</th>
+      <table id="cp-table"><thead><tr>
+        <th style="width:28px"></th>
+        <th>Work Order</th><th>Description</th><th>Equipment</th>
+        <th>Start</th><th>Finish</th><th>Acts</th>
         <th style="text-align:right">Plan hrs</th>
-        <th style="text-align:right">Headcount</th>
-        <th>Float</th><th>Progress</th><th>Resources</th>
+        <th>Min Float</th><th>Resources</th>
       </tr></thead><tbody id="cp-tbody"></tbody></table>
     </div>
   </div>
@@ -596,11 +596,13 @@ tr.selected td{background:#EEF5FD}
       <button class="sc-btn" data-sc="cp" onclick="selectSC('cp',this)">CP — manhours</button>
       <button class="sc-btn" data-sc="cp_acts" onclick="selectSC('cp_acts',this)">CP — activities</button>
       <button class="sc-btn" data-sc="hist" onclick="selectSC('hist',this)">Activities per day</button>
+      <button class="sc-btn" data-sc="histlh" onclick="selectSC('histlh',this)">Manhours per day</button>
       <button class="sc-btn" data-sc="float" onclick="selectSC('float',this)">Float burn-down</button>
       <button class="sc-btn" data-sc="combined_lh" onclick="selectSC('combined_lh',this)" id="btn-sc-combined" style="display:none">Combined manhours</button>
     </div>
     <div class="filters" style="margin-bottom:.75rem">
       <select id="sc-eq-filter" onchange="renderSC(activeSC);buildSCStats();updateSCPctComplete(activeSC)"><option value="">All equipment types</option></select>
+      <select id="sc-phase-filter" multiple style="min-width:180px;font-size:12px" title="Hold Ctrl/Cmd to select multiple phases" onchange="renderSC(activeSC);buildSCStats();updateSCPctComplete(activeSC)"><option value="" selected>All phases</option></select>
     </div>
 
     <div class="pct-complete-row" id="sc-pct-row">
@@ -1103,7 +1105,11 @@ function buildFilters(){
     if(phases.indexOf(w.ph)<0)phases.push(w.ph);
     if(eqs.indexOf(w.eq)<0)eqs.push(w.eq);
   });
-  phases.sort().forEach(function(p){document.getElementById('wo-phase').add(new Option(p,p));});
+  phases.sort().forEach(function(p){
+    document.getElementById('wo-phase').add(new Option(p,p));
+    var scPhSel=document.getElementById('sc-phase-filter');
+    if(scPhSel) scPhSel.add(new Option(p,p));
+  });
   eqs.sort().forEach(function(e){
     document.getElementById('wo-eq').add(new Option(e,e));
     document.getElementById('cp-eq').add(new Option(e,e));
@@ -1517,24 +1523,68 @@ function filterCP(){
 }
 function renderCPTable(){
   var tbody=document.getElementById('cp-tbody');
-  if(!filteredCP.length){tbody.innerHTML='<tr><td colspan="12" class="empty">No activities match.</td></tr>';return;}
-  tbody.innerHTML=filteredCP.map(function(a){
-    var rd=a.res&&a.res.length?a.res.map(function(r){return'<span class="chip '+(a.fd!=null&&a.fd<=3?'warn':'')+' ">'+r+'</span>';}).join(''):'<span style="color:#A32D2D;font-size:11px;font-weight:600">⚠ Unresourced</span>';
-    var pct=a.plan_lh>0?Math.min(100,Math.round((a.actual_lh||0)/a.plan_lh*100)):0;
-    var sc={Complete:'#1D9E75','In Progress':'#EF9F27'}[a.status];
-    return'<tr>'+
-      '<td style="font-family:monospace;font-size:11px;white-space:nowrap;color:#185FA5">'+a.id+'</td>'+
-      '<td class="wrap">'+a.name+'</td>'+
-      '<td style="font-family:monospace;font-size:11px;color:#888">'+a.wo_id+'</td>'+
-      '<td style="white-space:nowrap;font-size:12px">'+a.eq+'</td>'+
-      '<td class="date-cell">'+fmtD(a.start)+'</td><td class="date-cell">'+fmtD(a.finish)+'</td>'+
-      '<td style="white-space:nowrap">'+a.dur+'</td>'+
-      '<td style="text-align:right">'+a.plan_lh+'h</td>'+
-      '<td style="text-align:center">'+hcBadge(a.hc)+'</td>'+
-      '<td><span class="dot" style="background:'+fc(a.fd)+'"></span><strong>'+(a.fs||'—')+'</strong></td>'+
-      '<td>'+(a.status&&sc?'<span style="color:'+sc+';font-size:11px;font-weight:500">'+a.status+'</span>'+(a.plan_lh>0?'<div class="prog-bar"><div class="prog-fill" style="width:'+pct+'%;background:'+sc+'"></div></div>':''):'—')+'</td>'+
-      '<td class="wrap">'+rd+'</td></tr>';
-  }).join('');
+  if(!filteredCP.length){tbody.innerHTML='<tr><td colspan="10" class="empty">No activities match.</td></tr>';return;}
+
+  // Group activities by work order
+  var woMap={};
+  filteredCP.forEach(function(a){
+    if(!woMap[a.wo_id]) woMap[a.wo_id]={id:a.wo_id,name:a.wo_name||a.wo_id,eq:a.eq,acts:[],plan_lh:0,mf:null,res:{},start:null,finish:null};
+    var wo=woMap[a.wo_id];
+    wo.acts.push(a);
+    wo.plan_lh+=a.plan_lh||0;
+    if(a.fd!=null&&(wo.mf===null||a.fd<wo.mf)) wo.mf=a.fd;
+    (a.res||[]).forEach(function(r){wo.res[r]=true;});
+    if(!wo.start||a.start<wo.start) wo.start=a.start;
+    if(!wo.finish||a.finish>wo.finish) wo.finish=a.finish;
+  });
+
+  var wos=Object.keys(woMap).map(function(k){return woMap[k];});
+  wos.sort(function(a,b){return(a.mf==null?999:a.mf)-(b.mf==null?999:b.mf);});
+
+  var rows='';
+  wos.forEach(function(wo,i){
+    var wid='cpwo_'+i;
+    var mfColor=fc(wo.mf);
+    var mfStr=wo.mf!=null?wo.mf.toFixed(1)+'d':'—';
+    var res=Object.keys(wo.res);
+    var resHtml=res.length?res.slice(0,4).map(function(r){return'<span class="chip warn">'+r+'</span>';}).join('')+(res.length>4?'<span style="color:#888;font-size:11px"> +'+( res.length-4)+' more</span>':''):'<span style="color:#A32D2D;font-size:11px;font-weight:600">⚠ Unresourced</span>';
+    var ncCount=wo.acts.filter(function(a){return a.fd!=null&&a.fd<=3;}).length;
+    var badge=ncCount>0?'<span style="background:#FFF3CD;color:#856404;font-size:10px;padding:1px 5px;border-radius:4px;margin-left:4px">'+ncCount+' near-critical</span>':'';
+    rows+='<tr class="cp-wo-row" onclick="toggleCPWO(''+wid+'')" style="cursor:pointer;background:#f0f4f9;border-top:2px solid #d0dae8">'+
+      '<td style="text-align:center;font-size:13px;color:#555" id="arrow_'+wid+'">▶</td>'+
+      '<td style="font-family:monospace;font-size:11px;white-space:nowrap;color:#185FA5;font-weight:600">'+wo.id+'</td>'+
+      '<td class="wrap" style="font-weight:600">'+wo.name+badge+'</td>'+
+      '<td style="white-space:nowrap;font-size:12px">'+wo.eq+'</td>'+
+      '<td class="date-cell">'+fmtD(wo.start)+'</td><td class="date-cell">'+fmtD(wo.finish)+'</td>'+
+      '<td style="text-align:center;font-weight:600">'+wo.acts.length+'</td>'+
+      '<td style="text-align:right;font-weight:600">'+Math.round(wo.plan_lh)+'h</td>'+
+      '<td><span class="dot" style="background:'+mfColor+'"></span><strong>'+mfStr+'</strong></td>'+
+      '<td class="wrap">'+resHtml+'</td></tr>';
+    wo.acts.sort(function(a,b){return(a.fd==null?999:a.fd)-(b.fd==null?999:b.fd);});
+    wo.acts.forEach(function(a){
+      var pct=a.plan_lh>0?Math.min(100,Math.round((a.actual_lh||0)/a.plan_lh*100)):0;
+      var sc={Complete:'#1D9E75','In Progress':'#EF9F27'}[a.status];
+      var rd=a.res&&a.res.length?a.res.map(function(r){return'<span class="chip '+(a.fd!=null&&a.fd<=3?'warn':'')+' ">'+r+'</span>';}).join(''):'<span style="color:#A32D2D;font-size:11px;font-weight:600">⚠ Unresourced</span>';
+      rows+='<tr class="cp-act-row" data-wo="'+wid+'" style="display:none;background:#fafbfd">'+
+        '<td></td>'+
+        '<td style="font-family:monospace;font-size:10px;color:#185FA5;padding-left:16px">'+a.id+'</td>'+
+        '<td class="wrap" style="font-size:12px;color:#444">'+a.name+'</td>'+
+        '<td></td>'+
+        '<td class="date-cell">'+fmtD(a.start)+'</td><td class="date-cell">'+fmtD(a.finish)+'</td>'+
+        '<td></td>'+
+        '<td style="text-align:right;font-size:12px">'+a.plan_lh+'h</td>'+
+        '<td><span class="dot" style="background:'+fc(a.fd)+'"></span><span style="font-size:12px">'+(a.fs||'—')+'</span></td>'+
+        '<td class="wrap">'+rd+'</td></tr>';
+    });
+  });
+  tbody.innerHTML=rows;
+}
+function toggleCPWO(wid){
+  var rows=document.querySelectorAll('.cp-act-row[data-wo="'+wid+'"]');
+  var arrow=document.getElementById('arrow_'+wid);
+  var isOpen=rows.length>0&&rows[0].style.display!=='none';
+  rows.forEach(function(r){r.style.display=isOpen?'none':'table-row';});
+  if(arrow) arrow.textContent=isOpen?'▶':'▼';
 }
 
 // ---- S-curves ----
@@ -1559,6 +1609,10 @@ var SC_CFG={
         sub:'Activities planned vs actually completing each day · click any bar to see detail',
         legend:[{c:'rgba(55,138,221,.6)',l:'Planned'},{c:'rgba(29,158,117,.8)',l:'Actual'},{c:'#185FA5',l:'5-day rolling avg (plan)'}],
         mixed:true},
+  histlh:{title:'Manhours per day — planned vs actual',
+          sub:'Planned vs actual manhours earned each day · click any bar to see detail',
+          legend:[{c:'rgba(55,138,221,.6)',l:'Planned'},{c:'rgba(29,158,117,.8)',l:'Actual'},{c:'#185FA5',l:'5-day rolling avg (plan)'}],
+          mixed_lh:true},
   float:{title:'Schedule float — burn-down',
          sub:'Average remaining float (days) across all TAR activities over the window',
          legend:[{c:'#854F0B',l:'Avg float (days)'}],
@@ -1731,6 +1785,8 @@ function computeLiveCharts(){
       plan_cp:cumCP,   early_cp:cumECP,  late_cp:cumLCP,  actual_cp:cumACP,
       hist:histByDay[dk]||0,
       actual_hist:actualActByDay[dk]||0,
+      hist_lh:Math.round(planLHByDay[dk]||0),
+      actual_hist_lh:Math.round(actualLHByDay[dk]||0),
       avg_float:dk>=TAR_START_STR&&dk<=TAR_END_STR?avgFloat:null
     };
   });
@@ -2296,14 +2352,14 @@ function renderCombinedSCurve(){
               tip.style.cssText='position:fixed;background:#1E3A5F;color:#fff;padding:10px 14px;border-radius:8px;font-size:12px;pointer-events:none;z-index:9999;min-width:200px;box-shadow:0 4px 16px rgba(0,0,0,.25);line-height:1.9';
               document.body.appendChild(tip);}
             var t=context.tooltip;
-            if(t.opacity===0){tip.style.opacity='0';return;}
+            if(t.opacity===0){tip.style.display='none';return;}
             if(t.dataPoints&&t.dataPoints.length){
               var rows=t.dataPoints.map(function(dp){
                 var v=dp.parsed.y;
                 return '<div style="display:flex;justify-content:space-between;gap:20px"><span style="color:'+dp.dataset.borderColor+'">'+dp.dataset.label+'</span><span style="font-weight:700">'+(v!=null?Math.round(v).toLocaleString():'—')+'</span></div>';
               }).join('');
               tip.innerHTML='<div style="font-weight:700;font-size:13px;margin-bottom:5px;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:4px">'+t.dataPoints[0].label+'</div>'+rows;
-              tip.style.opacity='1';
+              tip.style.display='block';
             }
             var r=context.chart.canvas.getBoundingClientRect();
             var x=r.left+t.caretX+14,y=r.top+t.caretY-10;
@@ -2399,8 +2455,9 @@ function updateSCPctComplete(key) {
   // Use filtered points if equipment filter is active
   var scEq = document.getElementById('sc-eq-filter');
   var eqFilter = scEq ? scEq.value : '';
+  var phFilter3=typeof getScPhaseFilter==='function'?getScPhaseFilter():[];
   var pts;
-  if(eqFilter && typeof computeFilteredSC === 'function') {
+  if((eqFilter||phFilter3.length) && typeof computeFilteredSC === 'function') {
     pts = computeFilteredSC(eqFilter);
   } else {
     pts = window.chartPoints || CHART_DATA;
@@ -2666,13 +2723,22 @@ function behindGo(p) { behindPage=p; renderBehindTable(); }
 
 
 // Compute S-curve points filtered to a specific equipment type
+function getScPhaseFilter(){
+  var sel=document.getElementById('sc-phase-filter');
+  if(!sel) return [];
+  var out=[];
+  for(var i=0;i<sel.options.length;i++){if(sel.options[i].selected&&sel.options[i].value) out.push(sel.options[i].value);}
+  return out;
+}
 function computeFilteredSC(eqFilter){
-  if(!eqFilter) return window.chartPoints||CHART_DATA;
+  var phaseFilter=getScPhaseFilter();
+  if(!eqFilter&&!phaseFilter.length) return window.chartPoints||CHART_DATA;
 
-  // Collect acts for this equipment type only
+  // Collect acts filtered by equipment and/or phase
   var acts=[];
   allWO.forEach(function(wo){
-    if(wo.eq!==eqFilter) return;
+    if(eqFilter&&wo.eq!==eqFilter) return;
+    if(phaseFilter.length&&phaseFilter.indexOf(wo.ph||'')<0) return;
     (wo.acts||[]).forEach(function(a){ acts.push(a); });
   });
   if(!acts.length) return window.chartPoints||CHART_DATA;
@@ -2783,8 +2849,9 @@ function computeFilteredSC(eqFilter){
 function buildSCStats(){
   var scEq=document.getElementById('sc-eq-filter');
   var eqFilter=scEq?scEq.value:'';
+  var phFilter=typeof getScPhaseFilter==='function'?getScPhaseFilter():[];
   var pts;
-  if(eqFilter){
+  if(eqFilter||phFilter.length){
     pts=computeFilteredSC(eqFilter);
   } else {
     pts=window.chartPoints||CHART_DATA;
@@ -2864,10 +2931,11 @@ function renderSC(key){
   var cfg=SC_CFG[key];
   var scEq=document.getElementById('sc-eq-filter');
   var eqFilter=scEq?scEq.value:'';
+  var phFilter2=typeof getScPhaseFilter==='function'?getScPhaseFilter():[];
 
-  // If equipment filter active, recompute filtered points
+  // If equipment or phase filter active, recompute filtered points
   var pts;
-  if(eqFilter){
+  if(eqFilter||phFilter2.length){
     pts=computeFilteredSC(eqFilter);
   } else {
     pts=window.chartPoints||CHART_DATA;
@@ -2911,6 +2979,25 @@ function renderSC(key){
               y:{beginAtZero:true,grid:{color:'rgba(0,0,0,.05)'},ticks:{font:{size:11}},title:{display:true,text:'Activities per day',font:{size:11}}}}}});
     return;
   }
+  if(cfg.mixed_lh){
+    var selectedDate3=getProgressDate();
+    var planLHHist=pts.map(function(p){return p.hist_lh||0;});
+    var actLHHist=pts.map(function(p){return p.actual_hist_lh||0;});
+    var rollingLH=pts.map(function(_,i){
+      var slice=planLHHist.slice(Math.max(0,i-2),i+3);
+      return Math.round(slice.reduce(function(s,v){return s+v;},0)/slice.length);
+    });
+    activeScChart=new Chart(ctx,{data:{labels:labels,datasets:[
+      {type:'bar',label:'Planned hrs',data:planLHHist,backgroundColor:'rgba(55,138,221,.5)',borderColor:'#378ADD',borderWidth:1,borderRadius:2},
+      {type:'bar',label:'Actual hrs',data:actLHHist,backgroundColor:'rgba(29,158,117,.8)',borderColor:'#1D9E75',borderWidth:1,borderRadius:2},
+      {type:'line',label:'5-day avg (plan)',data:rollingLH,borderColor:'#185FA5',backgroundColor:'transparent',borderWidth:2,tension:.4,pointRadius:0}
+    ]},options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,
+        callbacks:{label:function(ctx){return ctx.dataset.label+': '+ctx.parsed.y.toLocaleString()+'h';}}}},
+      scales:{x:{grid:{color:'rgba(0,0,0,.05)'},ticks:{font:{size:11},maxRotation:45,autoSkip:true,maxTicksLimit:30}},
+              y:{beginAtZero:true,grid:{color:'rgba(0,0,0,.05)'},ticks:{font:{size:11},callback:function(v){return v.toLocaleString()+'h';}},title:{display:true,text:'Manhours per day',font:{size:11}}}}}});
+    return;
+  }
   var scaleY={beginAtZero:true,grid:{color:'rgba(0,0,0,.05)'},ticks:{font:{size:11}}};
   if(cfg.yLabel)scaleY.title={display:true,text:cfg.yLabel,font:{size:11}};
   if(cfg.yMin!=null)scaleY.min=cfg.yMin;
@@ -2926,14 +3013,14 @@ function renderSC(key){
               tip.style.cssText='position:fixed;background:#1E3A5F;color:#fff;padding:10px 14px;border-radius:8px;font-size:12px;pointer-events:none;z-index:9999;min-width:200px;box-shadow:0 4px 16px rgba(0,0,0,.25);line-height:1.9';
               document.body.appendChild(tip);}
             var t=context.tooltip;
-            if(t.opacity===0){tip.style.opacity='0';return;}
+            if(t.opacity===0){tip.style.display='none';return;}
             if(t.dataPoints&&t.dataPoints.length){
               var rows=t.dataPoints.map(function(dp){
                 var v=dp.parsed.y;
                 return '<div style="display:flex;justify-content:space-between;gap:20px"><span style="color:'+dp.dataset.borderColor+'">'+dp.dataset.label+'</span><span style="font-weight:700">'+(v!=null?Math.round(v).toLocaleString():'—')+'</span></div>';
               }).join('');
               tip.innerHTML='<div style="font-weight:700;font-size:13px;margin-bottom:5px;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:4px">'+t.dataPoints[0].label+'</div>'+rows;
-              tip.style.opacity='1';
+              tip.style.display='block';
             }
             var r=context.chart.canvas.getBoundingClientRect();
             var x=r.left+t.caretX+14,y=r.top+t.caretY-10;
