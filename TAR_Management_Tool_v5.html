@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Freeport ASU 3 — TAR Management Tool</title>
+<title>Freeport ASU 3 — TAR Management Tool v6</title>
 <script>
 // Chart.js 4.x Canvas Shim — deferred render + ResizeObserver
 ;(function(global){
@@ -420,7 +420,7 @@ tr.selected td{background:#EEF5FD}
       <h1 style="font-size:17px;font-weight:700;color:#1E3A5F;margin:0;line-height:1.2">Freeport ASU 3 — TAR Management Tool</h1>
       <div style="font-size:11px;color:#888;display:flex;align-items:center;gap:5px">
         <span class="live-dot offline-dot" id="live-dot" style="width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0"></span>
-        <span id="data-status">Offline — baseline data (19 Mar 2026)</span>
+        <span id="data-status">Offline — fetching AL Freeport baseline…</span>
       </div>
       <div class="scope-toggle" style="display:flex;gap:5px;border:none;background:none;margin-top:5px">
         <button class="scope-btn active" id="btn-main" onclick="setScope('main')">Main Scope</button>
@@ -784,6 +784,10 @@ function woHeadcount(woId){
 
 // ── Resource Usage fetch from Google Sheets ──────────────────────────────
 var RES_USAGE_SHEET_ID = '1asMJpbIROrlT4x9cKK9jn-W2TXEhsLuaT__98wWkG9g';
+var AL_FREEPORT_GID    = '1951466491'; // AL Freeport baseline tab
+var BL_LH    = {};   // actId -> plan_lh from AL Freeport tab (overrides embedded ACTS_RAW)
+var BL_DATES = {};   // actId -> {start, finish} from AL Freeport tab
+var blLoaded = false;
 
 function fetchResUsage() {
   var url = 'https://docs.google.com/spreadsheets/d/' + RES_USAGE_SHEET_ID + 
@@ -836,6 +840,8 @@ function loadResUsage(data){
 window.addEventListener('load',function(){
   // Load resource headcounts from sheet
   fetchResUsage();
+  // Load fresh baseline from AL Freeport tab
+  fetchALFreeportBaseline();
   // Pre-fill main URL and auto-connect
   var scriptInput=document.getElementById('script-url');
   if(liveUrl){
@@ -863,11 +869,14 @@ function offlinePayload(){
       var aPct    = a[11] || 0;
       var aStatus = a[12] || '';
       var aActLH  = aPct>0 ? Math.round((a[2]||0)*aPct/100*10)/10 : 0;
-      return{id:a[0],name:a[1],plan_lh:a[2],actual_lh:aActLH,pct:aPct,
+      return{id:a[0],name:a[1],
+             plan_lh:(BL_LH[a[0]]!==undefined?BL_LH[a[0]]:a[2]),
+             actual_lh:aActLH,pct:aPct,
              fd:a[3],fs:a[4],dur:a[5],dur_h:durH,
-             hc:calcHC(a[2],durH),
+             hc:calcHC((BL_LH[a[0]]!==undefined?BL_LH[a[0]]:a[2]),durH),
              res:a[6]||[],start:a[7]||'',finish:a[8]||'',
-             bl_start:a[7]||'',bl_finish:a[8]||'',
+             bl_start:(BL_DATES[a[0]]&&BL_DATES[a[0]].start)||a[7]||'',
+             bl_finish:(BL_DATES[a[0]]&&BL_DATES[a[0]].finish)||a[8]||'',
              late_finish:a[14]||a[8]||'',
              status:aStatus,notes:'',wo_id:w[0],eq:w[2]};
     });
@@ -876,6 +885,74 @@ function offlinePayload(){
            start:w[8],finish:w[9],acts:woActs};
   });
   return{wos:wos,scurve:null};
+}
+
+// ── AL Freeport Baseline fetch ────────────────────────────────────────────────
+// Reads the 'AL Freeport' tab and builds BL_LH / BL_DATES keyed by Activity ID.
+// Column names are detected from the header row to handle P6 export variations.
+function fetchALFreeportBaseline() {
+  var url = 'https://docs.google.com/spreadsheets/d/' + RES_USAGE_SHEET_ID +
+            '/export?format=csv&gid=' + AL_FREEPORT_GID;
+  fetch(url, {credentials:'include'})
+    .then(function(r){
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.text();
+    })
+    .then(function(csv){
+      function parseCSVLine(line) {
+        var result=[],current='',inQ=false;
+        for(var i=0;i<line.length;i++){
+          var c=line[i];
+          if(c==='"'){inQ=!inQ;}
+          else if(c===','&&!inQ){result.push(current.trim());current='';}
+          else{current+=c;}
+        }
+        result.push(current.trim().replace(/\r$/,''));
+        return result;
+      }
+      var rows = csv.split('\n').map(parseCSVLine);
+      if(rows.length < 2){ console.log('AL Freeport baseline: no data rows'); return; }
+
+      var hdrs = rows[0].map(function(h){ return h.toLowerCase().replace(/[\s_]+/g,' ').trim(); });
+      var idCol=-1, lhCol=-1, startCol=-1, finishCol=-1;
+      hdrs.forEach(function(h,i){
+        if(idCol<0 && (h==='activity id'||h==='act id'||h==='id')) idCol=i;
+        if(lhCol<0 && (
+          h.indexOf('bl labor unit')>=0||h.indexOf('bl labour unit')>=0||
+          h.indexOf('bl1 labor unit')>=0||h.indexOf('bl1 labour unit')>=0||
+          h.indexOf('planned labor unit')>=0||h.indexOf('planned labour unit')>=0||
+          h==='plan lh'||h==='planned lh'||h==='bl lh'||h==='bl work'||
+          h==='planned work'||h==='labor units'||h==='labour units'
+        )) lhCol=i;
+        if(startCol<0 && (h==='bl start'||h==='bl1 start'||h==='baseline start'||h==='planned start')) startCol=i;
+        if(finishCol<0 && (h==='bl finish'||h==='bl1 finish'||h==='baseline finish'||h==='planned finish')) finishCol=i;
+      });
+      if(idCol<0) idCol=0;
+      console.log('AL Freeport columns — id:'+idCol+' lh:'+lhCol+' start:'+startCol+' finish:'+finishCol);
+
+      var newLH={}, newDates={}, count=0;
+      rows.slice(1).forEach(function(r){
+        var actId=(r[idCol]||'').trim();
+        if(!actId||actId==='Activity ID') return;
+        if(lhCol>=0){
+          var lh=parseFloat((r[lhCol]||'').replace(/,/g,''));
+          if(!isNaN(lh)&&lh>0){ newLH[actId]=lh; count++; }
+        }
+        if(startCol>=0&&r[startCol]){ newDates[actId]=newDates[actId]||{}; newDates[actId].start=r[startCol].trim(); }
+        if(finishCol>=0&&r[finishCol]){ newDates[actId]=newDates[actId]||{}; newDates[actId].finish=r[finishCol].trim(); }
+      });
+
+      BL_LH=newLH; BL_DATES=newDates; blLoaded=true;
+      console.log('AL Freeport baseline loaded: '+count+' activities with labour hours');
+
+      var statusEl=document.getElementById('data-status');
+      if(statusEl&&statusEl.textContent.indexOf('19 Mar 2026')>=0){
+        statusEl.textContent='Offline — baseline: AL Freeport ('+count+' acts, live)';
+      }
+      if(typeof filterWOs==='function') filterWOs();
+      if(typeof renderSCurve==='function') renderSCurve();
+    })
+    .catch(function(e){ console.warn('AL Freeport baseline fetch failed (using embedded snapshot):', e); });
 }
 
 function fetchLive(url){
@@ -894,46 +971,46 @@ function fetchLive(url){
     clearTimeout(timeout); delete window[cbName];
     try{document.body.removeChild(script);}catch(e){}
     if(data.error){setStatus('offline','Sheet error: '+data.error);loadData(offlinePayload());return;}
-    // Merge live actuals onto baseline WO data
-    // Build act-level lookup from live response
-    var liveActMap = {};
-    (data.wos||[]).forEach(function(wo){
-      (wo.acts||[]).forEach(function(a){
-        liveActMap[a.id] = a;
-      });
+    // Use live data as primary source
+    // Build baseline plan_lh lookup: start with embedded ACTS_RAW, then overlay
+    // fresh AL Freeport tab data (BL_LH) if it has been fetched successfully.
+    var basePlanLH = {};
+    Object.keys(ACTS_RAW||{}).forEach(function(woId){
+      (ACTS_RAW[woId]||[]).forEach(function(a){ basePlanLH[a[0]] = a[2]||0; });
     });
-    // Apply live pct/actual_lh/status/dates to baseline WOs
-    var basePayload = offlinePayload();
-    basePayload.wos.forEach(function(wo){
-      var livePlanTotal=0, liveActualTotal=0;
-      (wo.acts||[]).forEach(function(a){
-        var live = liveActMap[a.id];
-        if(live){
-          a.pct        = live.pct        || 0;
-          a.actual_lh  = live.actual_lh  || Math.round((a.plan_lh||0)*(live.pct||0)/100*10)/10;
-          a.status     = live.status     || '';
-          a.start      = live.start      || a.start;
-          a.finish     = live.finish     || a.finish;
-          a.bl_start   = live.bl_start   || a.bl_start;
-          a.bl_finish  = live.bl_finish  || a.bl_finish;
-          a.late_finish= live.late_finish|| a.late_finish;
-          a.fd         = live.fd != null ? live.fd : a.fd;
-          a.fs         = live.fs         || a.fs;
-          a.res        = live.res && live.res.length ? live.res : a.res;
-        }
-        livePlanTotal   += a.plan_lh   || 0;
-        liveActualTotal += a.actual_lh || 0;
+    if(blLoaded){
+      Object.keys(BL_LH).forEach(function(id){ basePlanLH[id] = BL_LH[id]; });
+      console.log('Baseline overlaid from AL Freeport: '+Object.keys(BL_LH).length+' activities');
+    }
+
+    // Use live WOs directly, fill plan_lh from baseline where needed
+    var mergedWOs = (data.wos||[]).map(function(wo){
+      var woActual=0, woPlan=0;
+      var acts = (wo.acts||[]).map(function(a){
+        var planLH = (a.plan_lh > 0) ? a.plan_lh : (basePlanLH[a.id] || 0);
+        var actualLH = a.actual_lh > 0 ? a.actual_lh :
+                       Math.round(planLH * (a.pct||0) / 100 * 10) / 10;
+        var status = a.status || (a.pct>=100 ? 'Complete' : '');
+        woPlan   += planLH;
+        woActual += actualLH;
+        return {
+          id:a.id, name:a.name, plan_lh:planLH, actual_lh:actualLH,
+          pct:a.pct||0, status:status, fd:a.fd, fs:a.fs, dur:a.dur, dur_h:a.dur_h||0,
+          hc:a.hc||0, res:a.res||[], start:a.start||'', finish:a.finish||'',
+          bl_start:(BL_DATES[a.id]&&BL_DATES[a.id].start)||a.bl_start||a.start||'',
+          bl_finish:(BL_DATES[a.id]&&BL_DATES[a.id].finish)||a.bl_finish||a.finish||'',
+          late_finish:a.late_finish||'', notes:'', wo_id:wo.id, eq:a.eq||wo.eq||''
+        };
       });
-      wo.plan_lh   = Math.round(livePlanTotal);
-      wo.actual_lh = Math.round(liveActualTotal);
-      // min float from acts
-      var minFd = null;
-      (wo.acts||[]).forEach(function(a){ if(a.fd!=null&&(minFd===null||a.fd<minFd)) minFd=a.fd; });
-      if(minFd!==null) wo.mf = minFd;
+      return {
+        id:wo.id, name:wo.name, eq:wo.eq, ph:wo.ph||wo.phase||'',
+        ac:acts.length, plan_lh:Math.round(woPlan), actual_lh:Math.round(woActual),
+        mf:wo.mf!=null?wo.mf:(wo.min_float!=null?wo.min_float:null),
+        res:wo.res||[], start:wo.start||'', finish:wo.finish||'', acts:acts
+      };
     });
-    // Use live scurve if available (it uses correct hours from sheet)
-    if(data.scurve && data.scurve.total_plan_lh > 0) basePayload.scurve = data.scurve;
-    loadData(basePayload);
+    var mergedPayload = {wos: mergedWOs, scurve: data.scurve||null};
+    loadData(mergedPayload);
     setStatus('live','Live — updated '+new Date().toLocaleTimeString());
     if(refreshTimer)clearInterval(refreshTimer);
     refreshTimer=setInterval(function(){fetchLive(url);},5*60*1000);
